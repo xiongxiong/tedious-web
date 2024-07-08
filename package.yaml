@@ -1,0 +1,116 @@
+name:                tedious-web
+version:             0.1.0.0
+github:              "githubuser/tedious-web"
+license:             BSD-3-Clause
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2024 Author name here"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/tedious-web#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- aeson
+- data-default
+- data-default-instances-containers
+- effectful-core
+- extra
+- haskell-src-meta
+- http-types
+- insert-ordered-containers
+- lens
+- megaparsec
+- mtl
+- opaleye
+- openapi3
+- postgresql-simple
+- product-profunctors
+- profunctors
+- resource-pool
+- tagged
+- template-haskell
+- text
+- time
+- tuple
+- unordered-containers
+- webgear-core
+
+default-extensions:
+- DataKinds
+- DeriveAnyClass
+- DeriveGeneric
+- DerivingStrategies
+- FlexibleContexts
+- FlexibleInstances
+- GADTs
+- ImportQualifiedPost
+- InstanceSigs
+- LambdaCase
+- MultiWayIf
+- NamedFieldPuns
+- OverloadedLabels
+- OverloadedStrings
+- RankNTypes
+- RecordWildCards
+- ScopedTypeVariables
+- TemplateHaskell
+- TypeApplications
+- TypeFamilies
+- TypeOperators
+- ViewPatterns
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wno-orphans
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
+  exposed-modules:
+  - Tedious
+  - Tedious.Type
+  - Tedious.Util
+
+executables:
+  tedious-web-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -ddump-splices
+    - -ddump-to-file
+    dependencies:
+    - tedious-web
+    - raw-strings-qq
+    - text
+
+tests:
+  tedious-web-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - tedious-web
