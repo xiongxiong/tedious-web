@@ -12,11 +12,12 @@ import Data.Tuple.All (Sel1 (..))
 import Database.PostgreSQL.Simple (Connection)
 import Effectful (Eff, IOE, MonadIO (..), (:>))
 import Effectful.Error.Dynamic (throwError)
-import Effectful.Reader.Dynamic (Reader, ask)
+import Effectful.Reader.Dynamic (Reader, asks)
 import qualified Network.HTTP.Types as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, where_, (.==))
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk)
 import WebGear.Core (Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
+import Data.Generics.Product (HasField' (field'))
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
 withDoc summ descr handler = setDescription descr <<< setSummary summ <<< handler
@@ -30,13 +31,14 @@ errorHandler ::
 errorHandler = proc (_, err) -> respondA HTTP.ok200 JSON -< (repErr 1 (pack . show $ err) :: Rep ())
 
 list ::
-  forall i d f ids t fs r h ts es. -- (record id) data (data filter) [id] table (table fields) (table record) arrow traits effects
+  forall i d f ids t fs r h ts e es. -- (record id) data (data filter) [id] table (table fields) (table record) arrow traits (app env) effects
   ( ids ~ [i],
     Integral i,
     DefaultFromField SqlInt8 i,
     Default Unpackspec fs fs,
     Default FromFields fs r,
-    Reader (Pool Connection) :> es,
+    HasField' "connPool" e (Pool Connection),
+    Reader e :> es,
     IOE :> es,
     StdHandler h (Eff es),
     Gets h '[Body JSON (PageI f)],
@@ -55,7 +57,7 @@ list tbl flt ord r2d =
         arrM
           ( \pageI -> catchRep $ do
               let mPage = _pageIPage pageI
-              pool <- ask
+              pool <- asks (^. field' @"connPool" @e @(Pool Connection))
               (rs, cs) <- liftIO . withResource pool $
                 \conn -> do
                   let sel = do
@@ -79,11 +81,12 @@ list tbl flt ord r2d =
       respondA HTTP.ok200 JSON -< res
 
 get ::
-  forall i fi d t fs r h ts es. -- (record id) (field id) data table (table fields) (table record) arrow traits effects
+  forall i fi d t fs r h ts e es. -- (record id) (field id) data table (table fields) (table record) arrow traits (app env) effects
   ( Default Unpackspec fs fs,
     Default FromFields fs r,
     Sel1 fs (Field fi),
-    Reader (Pool Connection) :> es,
+    HasField' "connPool" e (Pool Connection),
+    Reader e :> es,
     IOE :> es,
     StdHandler h (Eff es),
     HaveTraits '[PathVar "id" i] ts,
@@ -99,7 +102,7 @@ get tbl idf r2d =
     (md :: Maybe d) <-
       arrM
         ( \tid -> do
-            pool <- ask
+            pool <- asks (^. field' @"connPool" @e @(Pool Connection))
             rs <- liftIO . withResource pool $
               \conn -> runSelect conn $ do
                 r <- selectTable tbl
@@ -112,10 +115,11 @@ get tbl idf r2d =
     respondA HTTP.ok200 JSON -< rep md
 
 add ::
-  forall i fi a t fs h ts es. -- (record id) (data to add) table (table fields) arrow traits effects
+  forall i fi a t fs h ts e es. -- (record id) (data to add) table (table fields) arrow traits (app env) effects
   ( Sel1 fs (Field fi),
     DefaultFromField fi i,
-    Reader (Pool Connection) :> es,
+    HasField' "connPool" e (Pool Connection),
+    Reader e :> es,
     IOE :> es,
     StdHandler h (Eff es),
     Gets h '[Body JSON a],
@@ -131,7 +135,7 @@ add tbl a2t =
       tid <-
         arrM
           ( \toAdd -> catchRep $ do
-              pool <- ask
+              pool <- asks (^. field' @"connPool" @e @(Pool Connection))
               ids <- liftIO . withResource pool $ \conn -> do
                 runInsert
                   conn
@@ -148,10 +152,11 @@ add tbl a2t =
       respondA HTTP.ok200 JSON -< (tid :: Rep i)
 
 upd ::
-  forall i fi u t fs d r h ts es. -- (record id) (field id) update table (table fields) data (table record) arrow traits effects
+  forall i fi u t fs d r h ts e es. -- (record id) (field id) update table (table fields) data (table record) arrow traits (app env) effects
   ( Sel1 fs (Field fi),
     Default FromFields fs r,
-    Reader (Pool Connection) :> es,
+    HasField' "connPool" e (Pool Connection),
+    Reader e :> es,
     IOE :> es,
     StdHandler h (Eff es),
     HaveTraits '[PathVar "id" i] ts,
@@ -171,7 +176,7 @@ upd tbl idf u2t r2d =
       ru <-
         arrM
           ( \(tid, toUpd) -> catchRep $ do
-              pool <- ask
+              pool <- asks (^. field' @"connPool" @e @(Pool Connection))
               ru <- liftIO . withResource pool $ \conn -> do
                 runUpdate
                   conn
@@ -188,9 +193,10 @@ upd tbl idf u2t r2d =
       respondA HTTP.ok200 JSON -< (ru :: Rep d)
 
 del ::
-  forall i fi t fs h ts es. -- (record id) (field id) table (table fields) data (table fields) arrow traits effects
+  forall i fi t fs h ts e es. -- (record id) (field id) table (table fields) data (table fields) arrow traits (app env) effects
   ( Sel1 fs (Field fi),
-    Reader (Pool Connection) :> es,
+    HasField' "connPool" e (Pool Connection),
+    Reader e :> es,
     IOE :> es,
     StdHandler h (Eff es),
     HaveTraits '[PathVar "id" i] ts,
@@ -205,7 +211,7 @@ del tbl idf =
     r <-
       arrM
         ( \tid -> do
-            pool <- ask
+            pool <- asks (^. field' @"connPool" @e @(Pool Connection))
             c <- liftIO . withResource pool $
               \conn ->
                 runDelete conn $
