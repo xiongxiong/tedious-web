@@ -23,7 +23,6 @@ import Tedious.Type (tt)
 import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
 [tt|
-
 Page
   index `页码` Natural `1`
   size `每页条数` Natural `10`
@@ -32,6 +31,9 @@ Err deriving Exception
   code Natural
   message Text
 
+SysAdmin
+  name Text
+  pass Text
 |]
 
 --
