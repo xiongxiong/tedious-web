@@ -33,6 +33,9 @@ instance Default TL.Text where
 instance Default TLB.Builder where
   def = mempty
 
+instance Default Bool where
+  def = False
+
 instance Default Natural where
   def = 0
 
