@@ -87,6 +87,8 @@ library:
   source-dirs: src
   exposed-modules:
   - Tedious
+  - Tedious.Entity
+  - Tedious.Handler
   - Tedious.Type
   - Tedious.Util
 
