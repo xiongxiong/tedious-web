@@ -10,9 +10,11 @@ import Data.OpenApi.Internal.Schema (unnamed)
 import Data.OpenApi.Schema (ToSchema (..))
 import Data.Proxy (Proxy (..))
 import Data.Tagged (Tagged)
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Builder as TLB
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Builder qualified as TLB
+import Data.Time (UTCTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Typeable (typeRep)
 import GHC.Base (Symbol)
 import GHC.TypeLits (KnownSymbol, Natural)
@@ -33,3 +35,6 @@ instance Default TLB.Builder where
 
 instance Default Natural where
   def = 0
+
+instance Default UTCTime where
+  def = posixSecondsToUTCTime 0
