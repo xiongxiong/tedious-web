@@ -4,6 +4,7 @@
 module Tedious.Handler where
 
 import Control.Lens ((^.))
+import Data.Generics.Product (HasField' (field'))
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Pool (Pool, withResource)
 import Data.Profunctor.Product.Default (Default)
@@ -13,11 +14,10 @@ import Database.PostgreSQL.Simple (Connection)
 import Effectful (Eff, IOE, MonadIO (..), (:>))
 import Effectful.Error.Dynamic (throwError)
 import Effectful.Reader.Dynamic (Reader, asks)
-import qualified Network.HTTP.Types as HTTP
+import Network.HTTP.Types qualified as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, where_, (.==))
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk)
-import WebGear.Core (Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
-import Data.Generics.Product (HasField' (field'))
+import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
 withDoc summ descr handler = setDescription descr <<< setSummary summ <<< handler
@@ -29,6 +29,16 @@ errorHandler ::
   ) =>
   h (Request `With` ts, e) Response
 errorHandler = proc (_, err) -> respondA HTTP.ok200 JSON -< (repErr 1 (pack . show $ err) :: Rep ())
+
+authFail ::
+  ( StdHandler h (Eff es)
+  ) =>
+  h (Request `With` ts, BasicAuthError ()) Response
+authFail = proc (_request, err) -> case err of
+  BasicAuthAttributeError () ->
+    respondA HTTP.forbidden403 PlainText -< "Forbidden" :: Text
+  _ ->
+    respondA HTTP.unauthorized401 PlainText -< "Unauthorized" :: Text
 
 list ::
   forall i d f ids t fs r h ts e es. -- (record id) data (data filter) [id] table (table fields) (table record) arrow traits (app env) effects
