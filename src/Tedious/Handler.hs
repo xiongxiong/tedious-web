@@ -182,7 +182,7 @@ get envPool tbl idf r2d =
    in (handler, oper)
 
 add ::
-  forall i fi a t fs eff env es h ts. -- (record id) (data to add) table (table fields) eff effects (app env) arrow traits
+  forall i fi a t fs eff env es h ts. -- (record id) (field id) (data to add) table (table fields) eff effects (app env) arrow traits
   ( Typeable t,
     Sel1 fs (Field fi),
     DefaultFromField fi i,
@@ -230,7 +230,6 @@ dup ::
     Sel1 fs (Field fi),
     DefaultFromField fi i,
     Reader env :> es,
-    Error Err :> es,
     IOE :> es,
     eff ~ Eff es,
     StdHandler h eff,
@@ -246,7 +245,7 @@ dup envPool tbl idf =
         let tid = pick @(PathVar "id" i) $ from request
         tid_ <-
           arrM
-            ( \tid -> do
+            ( \tid -> catchRep $ do
                 pool <- asks envPool
                 ids <- liftIO . withResource pool $
                   \conn -> do
