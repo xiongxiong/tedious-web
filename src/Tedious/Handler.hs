@@ -223,10 +223,10 @@ add envPool tbl a2t =
    in (handler, oper)
 
 dup ::
-  forall i fi t fs eff env es h ts. -- (record id) (field id) table (table fields) eff effects (app env) arrow traits
+  forall i fi t fs r eff env es h ts. -- (record id) (field id) table (table fields) (table record) eff effects (app env) arrow traits
   ( Typeable t,
     Default Unpackspec fs fs,
-    Default FromFields fs t,
+    Default FromFields fs r,
     Sel1 fs (Field fi),
     DefaultFromField fi i,
     Reader env :> es,
@@ -239,8 +239,9 @@ dup ::
   (env -> Pool Connection) ->
   Table t fs ->
   (i -> Field fi) ->
+  (r -> t) ->
   (RequestHandler h ts, SysOper')
-dup envPool tbl idf =
+dup envPool tbl idf r2t =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         tid_ <-
@@ -257,7 +258,7 @@ dup envPool tbl idf =
                       conn
                       Insert
                         { iTable = tbl,
-                          iRows = rs,
+                          iRows = r2t <$> rs,
                           iReturning = rReturning sel1,
                           iOnConflict = Nothing
                         }
