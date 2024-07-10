@@ -5,7 +5,6 @@ module Tedious.Handler where
 
 import Control.Arrow (returnA)
 import Control.Lens ((^.))
-import Data.Generics.Product (HasField' (field'))
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Pool (Pool, withResource)
 import Data.Profunctor.Product.Default (Default)
@@ -51,21 +50,23 @@ authFail = proc (_request, err) -> case err of
     respondA HTTP.unauthorized401 PlainText -< "Unauthorized" :: Text
 
 audit ::
-  forall h ts e es. -- arrow traits (app env) effects
-  ( HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+  forall eff env es h ts. -- eff effects (app env) arrow traits
+  ( Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es)
+    eff ~ Eff es,
+    StdHandler h eff
   ) =>
-  Text ->
+  (env -> Pool Connection) ->
+  Maybe Text ->
   (RequestHandler h ts, SysOper') ->
   RequestHandler h ts
-audit user (handler, oper) =
+audit envPool user (handler, oper) =
   proc request -> do
+    res <- handler -< request
     arrM
       ( const $ do
           now <- liftIO getCurrentTime
-          pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+          pool <- asks envPool
           liftIO . withResource pool $ \conn -> do
             runInsert
               conn
@@ -73,7 +74,7 @@ audit user (handler, oper) =
                 { iTable = sysOperTable,
                   iRows =
                     [ ( Nothing,
-                        Just . toNullable . sqlStrictText $ user,
+                        toNullable . sqlStrictText <$> user,
                         sqlStrictText . _sysOper'Name $ oper,
                         sqlStrictText . _sysOper'Target $ oper,
                         toNullable . sqlStrictText <$> _sysOper'Content oper,
@@ -86,30 +87,30 @@ audit user (handler, oper) =
       )
       -<
         ()
-    res <- handler -< request
     returnA -< res
 
 list ::
-  forall i d f ids t fs r h ts e es. -- (record id) data (data filter) [id] table (table fields) (table record) arrow traits (app env) effects
+  forall i d f ids t fs r eff env es h ts. -- (record id) data (data filter) [id] table (table fields) (table record) eff effects (app env) arrow traits
   ( Typeable t,
     ids ~ [i],
     Integral i,
     DefaultFromField SqlInt8 i,
     Default Unpackspec fs fs,
     Default FromFields fs r,
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     Gets h '[Body JSON (PageI f)],
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (PageO [d])), Body JSON (Rep ())]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (Maybe f -> fs -> Field SqlBool) ->
   Order fs ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
-list tbl flt ord r2d =
+list envPool tbl flt ord r2d =
   let handler = requestBody @(PageI f) JSON errorHandler $
         proc request -> do
           let pageI = pick @(Body JSON (PageI f)) $ from request
@@ -117,7 +118,7 @@ list tbl flt ord r2d =
             arrM
               ( \pageI -> catchRep $ do
                   let mPage = _pageIPage pageI
-                  pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                  pool <- asks envPool
                   (rs, cs) <- liftIO . withResource pool $
                     \conn -> do
                       let sel = do
@@ -143,29 +144,30 @@ list tbl flt ord r2d =
    in (handler, oper)
 
 get ::
-  forall i fi d t fs r h ts e es. -- (record id) (field id) data table (table fields) (table record) arrow traits (app env) effects
+  forall i fi d t fs r eff env es h ts. -- (record id) (field id) data table (table fields) (table record) eff effects (app env) arrow traits
   ( Typeable t,
     Default Unpackspec fs fs,
     Default FromFields fs r,
     Sel1 fs (Field fi),
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     HaveTraits '[PathVar "id" i] ts,
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (Maybe d))]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (i -> Field fi) ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
-get tbl idf r2d =
+get envPool tbl idf r2d =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         (md :: Maybe d) <-
           arrM
             ( \tid -> do
-                pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                pool <- asks envPool
                 rs <- liftIO . withResource pool $
                   \conn -> runSelect conn $ do
                     r <- selectTable tbl
@@ -180,28 +182,29 @@ get tbl idf r2d =
    in (handler, oper)
 
 add ::
-  forall i fi a t fs h ts e es. -- (record id) (data to add) table (table fields) arrow traits (app env) effects
+  forall i fi a t fs eff env es h ts. -- (record id) (data to add) table (table fields) eff effects (app env) arrow traits
   ( Typeable t,
     Sel1 fs (Field fi),
     DefaultFromField fi i,
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     Gets h '[Body JSON a],
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (a -> [t]) ->
   (RequestHandler h ts, SysOper')
-add tbl a2t =
+add envPool tbl a2t =
   let handler = requestBody @a JSON errorHandler $
         proc request -> do
           let toAdd = pick @(Body JSON a) $ from request
           tid <-
             arrM
               ( \toAdd -> catchRep $ do
-                  pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                  pool <- asks envPool
                   ids <- liftIO . withResource pool $ \conn -> do
                     runInsert
                       conn
@@ -220,30 +223,31 @@ add tbl a2t =
    in (handler, oper)
 
 dup ::
-  forall i fi t fs h ts e es. -- (record id) (field id) table (table fields) arrow traits (app env) effects
+  forall i fi t fs eff env es h ts. -- (record id) (field id) table (table fields) eff effects (app env) arrow traits
   ( Typeable t,
     Default Unpackspec fs fs,
     Default FromFields fs t,
     Sel1 fs (Field fi),
     DefaultFromField fi i,
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     Error Err :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     HaveTraits '[PathVar "id" i] ts,
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (i -> Field fi) ->
   (RequestHandler h ts, SysOper')
-dup tbl idf =
+dup envPool tbl idf =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         tid_ <-
           arrM
             ( \tid -> do
-                pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                pool <- asks envPool
                 ids <- liftIO . withResource pool $
                   \conn -> do
                     rs <- runSelect conn $ do
@@ -267,24 +271,25 @@ dup tbl idf =
    in (handler, oper)
 
 upd ::
-  forall i fi u t fs d r h ts e es. -- (record id) (field id) update table (table fields) data (table record) arrow traits (app env) effects
+  forall i fi u t fs d r eff env es h ts. -- (record id) (field id) update table (table fields) data (table record) eff effects (app env) arrow traits
   ( Typeable t,
     Sel1 fs (Field fi),
     Default FromFields fs r,
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     HaveTraits '[PathVar "id" i] ts,
     Gets h '[Body JSON u],
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep d), Body JSON (Rep ())]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (i -> Field fi) ->
   (u -> (fs -> t)) ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
-upd tbl idf u2t r2d =
+upd envPool tbl idf u2t r2d =
   let handler = requestBody @u JSON errorHandler $
         proc request -> do
           let tid = pick @(PathVar "id" i) $ from request
@@ -292,7 +297,7 @@ upd tbl idf u2t r2d =
           ru <-
             arrM
               ( \(tid, toUpd) -> catchRep $ do
-                  pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                  pool <- asks envPool
                   ru <- liftIO . withResource pool $ \conn -> do
                     runUpdate
                       conn
@@ -311,26 +316,27 @@ upd tbl idf u2t r2d =
    in (handler, oper)
 
 del ::
-  forall i fi t fs h ts e es. -- (record id) (field id) table (table fields) data (table fields) arrow traits (app env) effects
+  forall i fi t fs eff env es h ts. -- (record id) (field id) table (table fields) data (table fields) eff effects (app env) arrow traits
   ( Typeable t,
     Sel1 fs (Field fi),
-    HasField' "connPool" e (Pool Connection),
-    Reader e :> es,
+    Reader env :> es,
     IOE :> es,
-    StdHandler h (Eff es),
+    eff ~ Eff es,
+    StdHandler h eff,
     HaveTraits '[PathVar "id" i] ts,
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep Text), Body JSON (Rep ())]
   ) =>
+  (env -> Pool Connection) ->
   Table t fs ->
   (i -> Field fi) ->
   (RequestHandler h ts, SysOper')
-del tbl idf =
+del envPool tbl idf =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         r <-
           arrM
             ( \tid -> do
-                pool <- asks (^. field' @"connPool" @e @(Pool Connection))
+                pool <- asks envPool
                 c <- liftIO . withResource pool $
                   \conn ->
                     runDelete conn $
