@@ -71,7 +71,7 @@ data Combo
       BasTypName -- base type name
       (Maybe TblName) -- table name
       (Maybe [DevClsName]) -- derivings
-  deriving (Eq, Show, Generic)
+  deriving stock (Eq, Show, Generic)
 
 data Field
   = Field
@@ -79,14 +79,14 @@ data Field
       (FldTypS, MaybeFldBas, Maybe FldSamp) -- (type of field on base type, field is maybe or not)
       (Maybe TblFld) -- table field
       [(ExtTypName, MaybeFldExt)] -- (name of ext type which has this field, field of this type is maybe or not)
-  deriving (Eq, Show, Generic)
+  deriving stock (Eq, Show, Generic)
 
 data TblFld
   = TblFldR TblFldTypSR -- omit field name, write type and read type are same. eg. (Field Text)
   | TblFldWR TblFldTypSW TblFldTypSR -- omit field name, write type and read type are diff. eg. (Maybe (Field Text), Field Text)
   | TblFldNR TblFldName TblFldTypSR -- write type and read type are same. eg. ("field_name", Field Text)
   | TblFldNWR TblFldName TblFldTypSW TblFldTypSR -- write type and read type are diff. eg. ("field_name", Maybe (Field Text), Field Text)
-  deriving (Eq, Show, Generic)
+  deriving stock (Eq, Show, Generic)
 
 data TtRep = TtRep Combo [Field] deriving (Eq, Show, Generic)
 
@@ -107,7 +107,7 @@ lexeme :: Parser a -> Parser a
 lexeme = MCL.lexeme sc
 
 isNameChar :: Char -> Bool
-isNameChar c = isAlphaNum c || c == '_'
+isNameChar c = isAlphaNum c || c == '_' || c == '\''
 
 pName :: Parser String
 pName = lexeme $ takeWhile1P Nothing isNameChar

@@ -1,5 +1,6 @@
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Tedious.Entity where
 
@@ -10,15 +11,19 @@ import Data.Aeson qualified as A
 import Data.Aeson.TH (deriveJSON)
 import Data.Default (Default (..))
 import Data.HashMap.Strict.InsOrd (fromList)
+import Data.Int (Int64)
 import Data.OpenApi (HasExample (..), HasProperties (..), HasRequired (..), HasTitle (..), HasType (..), OpenApiType (..), ToSchema, declareSchemaRef, genericDeclareNamedSchema)
 import Data.OpenApi qualified as O
 import Data.OpenApi.Internal.Schema (named)
+import Data.Profunctor.Product
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import Data.Time (UTCTime)
 import Effectful (Eff)
 import Effectful.Error.Dynamic (Error, runErrorWith)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
+import Opaleye (Field, FieldNullable, SqlInt8, SqlText, SqlTimestamptz)
 import Tedious.Type (tt)
 import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
@@ -34,9 +39,19 @@ Err deriving Exception
 SysAdmin
   name Text
   pass Text
-|]
 
---
+SysUser
+  name Text (Field SqlText)
+  pass Text (Field SqlText)
+
+SysOper
+  id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)
+  user `人员` Text? (Maybe (FieldNullable SqlText), FieldNullable SqlText)
+  name `名称` Text (Field SqlText) SysOper'
+  target `目标` Text (Field SqlText) SysOper'
+  content `内容` Text? (Maybe (FieldNullable SqlText), FieldNullable SqlText) SysOper'
+  time `时间` UTCTime (Field SqlTimestamptz)
+|]
 
 data PageO a = PageO
   { _pageOPage :: Page,
