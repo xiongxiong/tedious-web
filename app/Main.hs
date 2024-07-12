@@ -32,7 +32,8 @@ import Text.RawString.QQ (r)
     masterAge `master's age` Int `26` DogC -- age of dog's master
     age `dog's age` Int `8` DogA DogB?
     hobby `dog's hobby` (Maybe Text)? `Just "meat"` (FieldNullable Text) DogC? DogB
-    color `dog's color` Text DogB DogC
+    color `dog's color` ((Text, Text, Text)) DogB DogC
+    friends `dog's friends` [Text] DogC
 
   Cat
     name Text CatA CatC

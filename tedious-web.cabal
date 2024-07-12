@@ -28,7 +28,7 @@ library
       Tedious
       Tedious.Entity
       Tedious.Handler
-      Tedious.Type
+      Tedious.Parser
       Tedious.Util
   other-modules:
       Tedious.Orphan
@@ -195,6 +195,7 @@ test-suite tedious-web-test
     , extra
     , generic-lens
     , haskell-src-meta
+    , hspec
     , http-types
     , insert-ordered-containers
     , lens

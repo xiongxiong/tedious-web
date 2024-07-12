@@ -1,40 +1,40 @@
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
-module Tedious.Type where
+module Tedious.Parser where
 
 import Control.Lens (declareLensesWith, lensRules)
-import qualified Control.Lens as L
+import Control.Lens qualified as L
 import Control.Monad (join, when)
 import Control.Monad.Cont (MonadCont (..), evalContT)
 import Control.Monad.Trans (lift)
 import Data.Aeson (FromJSON (..), ToJSON (..), genericParseJSON, genericToEncoding, genericToJSON)
-import qualified Data.Aeson as A
+import Data.Aeson qualified as A
 import Data.Char (isAlphaNum, isLowerCase, isPrint, isUpperCase)
 import Data.Default (Default (..))
 import Data.Function as F
 import Data.Functor (void, (<&>))
-import qualified Data.HashMap.Strict as HM
-import qualified Data.HashMap.Strict.InsOrd as IHM
+import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict.InsOrd qualified as IHM
 import Data.List.Extra (snoc)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.OpenApi (HasExample (..), HasProperties (..), HasRequired (..), HasTitle (..), HasType (..), OpenApiType (..), ToSchema, declareSchemaRef)
-import qualified Data.OpenApi as O
+import Data.OpenApi qualified as O
 import Data.OpenApi.Internal.Schema (named)
 import Data.Proxy (Proxy (..))
 import Data.Tuple.All (Curry (..), Sel1 (sel1), Sel3 (sel3), Sel4 (sel4))
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Meta (parseType)
-import Language.Haskell.TH (Body (NormalB), Clause (Clause), Dec (..), DerivStrategy (AnyclassStrategy), Exp (..), Pat (WildP), Q, Type (AppT, ConT, TupleT), appE, appT, bang, bangType, bindS, clause, conE, conT, dataD, derivClause, doE, funD, listE, litE, mkName, newtypeD, noBindS, noSourceStrictness, noSourceUnpackedness, normalB, parensE, recC, sigD, sigE, stringE, stringL, tupE, uInfixE, varBangType, varE, varP)
+import Language.Haskell.TH (Body (NormalB), Clause (Clause), Dec (..), DerivStrategy (..), Exp (..), Pat (WildP), Q, Type (AppT, ConT, TupleT), appE, appT, bang, bangType, bindS, clause, conE, conT, dataD, derivClause, doE, funD, listE, litE, mkName, newtypeD, noBindS, noSourceStrictness, noSourceUnpackedness, normalB, parensE, recC, sigD, sigE, stringE, stringL, tupE, uInfixE, varBangType, varE, varP)
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Opaleye (table, tableField)
 import Opaleye.Table (Table)
 import Tedious.Orphan ()
 import Tedious.Util (lowerFirst, toJSONOptions, trimPrefixName_, upperFirst)
 import Text.Megaparsec (MonadParsec (takeWhile1P, takeWhileP, try), Parsec, between, empty, errorBundlePretty, optional, parse, (<|>))
-import qualified Text.Megaparsec as M
-import qualified Text.Megaparsec.Char as MC
-import qualified Text.Megaparsec.Char.Lexer as MCL
+import Text.Megaparsec qualified as M
+import Text.Megaparsec.Char qualified as MC
+import Text.Megaparsec.Char.Lexer qualified as MCL
 
 type TypName = String
 
@@ -76,7 +76,7 @@ data Combo
 data Field
   = Field
       (FldName, Maybe FldTitle) -- (field name, field title used in openapi schema)
-      (FldTypS, MaybeFldBas, Maybe FldSamp) -- (type of field on base type, field is maybe or not)
+      (FldTypS, MaybeFldBas, Maybe FldSamp) -- (type of field on base type, field is maybe or not, example value in openapi schema)
       (Maybe TblFld) -- table field
       [(ExtTypName, MaybeFldExt)] -- (name of ext type which has this field, field of this type is maybe or not)
   deriving stock (Eq, Show, Generic)
@@ -88,7 +88,7 @@ data TblFld
   | TblFldNWR TblFldName TblFldTypSW TblFldTypSR -- write type and read type are diff. eg. ("field_name", Maybe (Field Text), Field Text)
   deriving stock (Eq, Show, Generic)
 
-data TtRep = TtRep Combo [Field] deriving (Eq, Show, Generic)
+data TtRep = TtRep Combo [Field] deriving stock (Eq, Show, Generic)
 
 --
 
@@ -130,6 +130,15 @@ parens = between (symbol "(") (symbol ")")
 parens' :: Parser String -> Parser String
 parens' p = join <$> sequence [pure "(", between (symbol "(") (symbol ")") p, pure ")"]
 
+pTuple :: Parser String
+pTuple = join <$> sequence [pure "(", between (symbol "(") (symbol ")") ((<>) <$> ((unwords <$> M.some pNameUpper) <|> pTuple) <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTuple)))))), pure ")"]
+
+brackets :: Parser a -> Parser a
+brackets = between (symbol "[") (symbol "]")
+
+brackets' :: Parser String -> Parser String
+brackets' p = join <$> sequence [pure "[", between (symbol "[") (symbol "]") p, pure "]"]
+
 quotes :: Parser a -> Parser a
 quotes = between (symbol "\"") (symbol "\"")
 
@@ -155,14 +164,19 @@ pFldNameAndTitle :: Parser (FldName, Maybe FldTitle)
 pFldNameAndTitle = (,) <$> pFldName <*> pFldTitle
 
 pFldTyp :: Parser FldTypS
-pFldTyp = try (unwords <$> (((<>) . pure . unwords <$> M.some pNameUpper) <*> (pure . unwords <$> M.some pFldTyp))) <|> parens' pFldTyp <|> (unwords <$> M.some pNameUpper)
+pFldTyp =
+  try (unwords <$> (((<>) . pure . unwords <$> M.some pNameUpper) <*> (pure . unwords <$> M.some pFldTyp)))
+    <|> try (parens' pFldTyp)
+    <|> try (brackets' pFldTyp)
+    <|> try pTuple
+    <|> (unwords <$> M.some pNameUpper)
 
 pFldSamp :: Parser (Maybe FldSamp)
 pFldSamp = pString
 
 pFldTypTup :: Parser (FldTypS, MaybeFldBas, Maybe FldSamp)
 pFldTypTup = do
-  (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp) <*> (True <$ MC.char '?' <|> pure False))
+  (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp) <*> (True <$ MC.char '?' <|> pure False))
   _mFldSamp <- pFldSamp
   pure (_fldTypS, _mFldBas, _mFldSamp)
 

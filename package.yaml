@@ -1,5 +1,5 @@
 name:                tedious-web
-version:             0.1.0.6
+version:             0.1.0.7
 github:              "githubuser/tedious-web"
 license:             BSD-3-Clause
 author:              "Author name here"
@@ -89,7 +89,7 @@ library:
   - Tedious
   - Tedious.Entity
   - Tedious.Handler
-  - Tedious.Type
+  - Tedious.Parser
   - Tedious.Util
 
 executables:
@@ -116,4 +116,5 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
+    - hspec
     - tedious-web

@@ -24,7 +24,7 @@ import Effectful.Error.Dynamic (Error, runErrorWith)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 import Opaleye (Field, FieldNullable, SqlInt8, SqlText, SqlTimestamptz)
-import Tedious.Type (tt)
+import Tedious.Parser (tt)
 import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
 [tt|
@@ -59,11 +59,11 @@ data PageO a = PageO
     _pageOData :: a
   }
 
-deriving instance (Show a) => Show (PageO a)
+deriving stock instance (Show a) => Show (PageO a)
 
-deriving instance (Eq a) => Eq (PageO a)
+deriving stock instance (Eq a) => Eq (PageO a)
 
-deriving instance Generic (PageO a)
+deriving stock instance Generic (PageO a)
 
 deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "PageO"}) ''PageO
 
@@ -76,7 +76,12 @@ data PageI a = PageI
   { _pageIPage :: Maybe Page,
     _pageIFilter :: Maybe a
   }
-  deriving (Show, Eq, Generic)
+
+deriving stock instance (Show a) => Show (PageI a)
+
+deriving stock instance (Eq a) => Eq (PageI a)
+
+deriving stock instance Generic (PageI a)
 
 deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "PageI"}) ''PageI
 
@@ -113,7 +118,12 @@ data Rep a = Rep
     _repMessage :: Text,
     _repData :: Maybe a
   }
-  deriving (Show, Eq, Generic)
+
+deriving stock instance (Show a) => Show (Rep a)
+
+deriving stock instance (Eq a) => Eq (Rep a)
+
+deriving stock instance Generic (Rep a)
 
 deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "Rep"}) ''Rep
 
