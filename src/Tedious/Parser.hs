@@ -9,7 +9,7 @@ import Control.Monad.Cont (MonadCont (..), evalContT)
 import Control.Monad.Trans (lift)
 import Data.Aeson (FromJSON (..), ToJSON (..), genericParseJSON, genericToEncoding, genericToJSON)
 import Data.Aeson qualified as A
-import Data.Char (isAlphaNum, isLowerCase, isPrint, isUpperCase)
+import Data.Char (isAlphaNum, isLowerCase, isPrint, isSpace, isUpperCase)
 import Data.Default (Default (..))
 import Data.Function as F
 import Data.Functor (void, (<&>))
@@ -36,6 +36,8 @@ import Text.Megaparsec qualified as M
 import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
 
+-- TODO: persistUpper, combo arbitrary keyword pos
+
 type TypName = String
 
 type BasTypName = String
@@ -46,23 +48,31 @@ type ExtTypName = String
 
 type FldName = String
 
-type FldTitle = String
+type FldLabel = String -- openapi label
 
 type FldTypS = String
 
-type FldSamp = String
+type FldSamp = String -- openapi example
 
 type TblName = String
 
-type TblFldName = String
+type TblFldOName = String
 
-type TblFldTypSW = String
+type TblFldOTypSW = String
 
-type TblFldTypSR = String
+type TblFldOTypSR = String
 
-type MaybeFldBas = Bool
+type FldBasIsMaybe = Bool
 
-type MaybeFldExt = Bool
+type FldExtIsMaybe = Bool
+
+type TblFldIsPrimary = Bool
+
+type TblFldUnique = String
+
+type TblFldDefault = String
+
+type TblUniqueName = String
 
 --
 
@@ -75,17 +85,26 @@ data Combo
 
 data Field
   = Field
-      (FldName, Maybe FldTitle) -- (field name, field title used in openapi schema)
-      (FldTypS, MaybeFldBas, Maybe FldSamp) -- (type of field on base type, field is maybe or not, example value in openapi schema)
+      (FldName, Maybe FldLabel) -- (field name, field label used in openapi schema)
+      (FldTypS, FldBasIsMaybe, Maybe FldSamp) -- (type of field on base type, field is maybe or not, example value in openapi schema)
       (Maybe TblFld) -- table field
-      [(ExtTypName, MaybeFldExt)] -- (name of ext type which has this field, field of this type is maybe or not)
+      [(ExtTypName, FldExtIsMaybe)] -- (name of ext type which has this field, the field of the ext type is maybe or not)
   deriving stock (Eq, Show, Generic)
 
-data TblFld
-  = TblFldR TblFldTypSR -- omit field name, write type and read type are same. eg. (Field Text)
-  | TblFldWR TblFldTypSW TblFldTypSR -- omit field name, write type and read type are diff. eg. (Maybe (Field Text), Field Text)
-  | TblFldNR TblFldName TblFldTypSR -- write type and read type are same. eg. ("field_name", Field Text)
-  | TblFldNWR TblFldName TblFldTypSW TblFldTypSR -- write type and read type are diff. eg. ("field_name", Maybe (Field Text), Field Text)
+data TblFld = TblFld TblFldOpaleye TblFldIsPrimary [TblFldUnique] (Maybe TblFldDefault)
+  deriving stock (Eq, Show, Generic)
+
+data TblFldOpaleye
+  = TblFldOR TblFldOTypSR -- omit field name, write type and read type are same. eg. (Field Text)
+  | TblFldOWR TblFldOTypSW TblFldOTypSR -- omit field name, write type and read type are diff. eg. (Maybe (Field Text), Field Text)
+  | TblFldONR TblFldOName TblFldOTypSR -- write type and read type are same. eg. ("field_name", Field Text)
+  | TblFldONWR TblFldOName TblFldOTypSW TblFldOTypSR -- write type and read type are diff. eg. ("field_name", Maybe (Field Text), Field Text)
+  deriving stock (Eq, Show, Generic)
+
+newtype TblPrimary = TblPrimary [FldName]
+  deriving stock (Eq, Show, Generic)
+
+data TblUnique = TblUnique TblUniqueName [FldName]
   deriving stock (Eq, Show, Generic)
 
 data TtRep = TtRep Combo [Field] deriving stock (Eq, Show, Generic)
@@ -157,10 +176,10 @@ pCombo = Combo <$> pNameUpper <*> pTbl <*> pDev
 pFldName :: Parser FldName
 pFldName = pNameLower
 
-pFldTitle :: Parser (Maybe FldTitle)
+pFldTitle :: Parser (Maybe FldLabel)
 pFldTitle = pString
 
-pFldNameAndTitle :: Parser (FldName, Maybe FldTitle)
+pFldNameAndTitle :: Parser (FldName, Maybe FldLabel)
 pFldNameAndTitle = (,) <$> pFldName <*> pFldTitle
 
 pFldTyp :: Parser FldTypS
@@ -174,28 +193,34 @@ pFldTyp =
 pFldSamp :: Parser (Maybe FldSamp)
 pFldSamp = pString
 
-pFldTypTup :: Parser (FldTypS, MaybeFldBas, Maybe FldSamp)
+pOccur :: String -> Parser Bool
+pOccur s = True <$ symbol s <|> pure False
+
+pFldTypTup :: Parser (FldTypS, FldBasIsMaybe, Maybe FldSamp)
 pFldTypTup = do
-  (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp) <*> (True <$ MC.char '?' <|> pure False))
+  (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp) <*> pOccur "?")
   _mFldSamp <- pFldSamp
   pure (_fldTypS, _mFldBas, _mFldSamp)
+
+pTblFldUnique :: Parser TblFldUnique
+pTblFldUnique = lexeme $ MC.char '!' *> pName
+
+pTblFldDefault :: Parser (Maybe String)
+pTblFldDefault = optional . lexeme $ (<>) <$> MC.string "default=" <*> takeWhile1P Nothing (not . isSpace)
 
 pTblFld :: Parser (Maybe TblFld)
 pTblFld =
   optional $
-    try (parens pTblFldR)
-      <|> try (parens pTblFldWR)
-      <|> try (parens pTblFldNR)
-      <|> try (parens pTblFldNWR)
+    pFldP (parens (TblFldOR <$> pFldO))
+      <|> pFldP (parens (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
+      <|> pFldP (parens (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
+      <|> pFldP (parens (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
   where
     pFldO = unwords <$> (((<>) . pure <$> (symbol "FieldNullable" <|> symbol "Field")) <*> (pure <$> pNameUpper))
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
-    pTblFldR = TblFldR <$> pFldO
-    pTblFldWR = TblFldWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)
-    pTblFldNR = TblFldNR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))
-    pTblFldNWR = TblFldNWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)
+    pFldP p = try (TblFld <$> p <*> pOccur "!" <*> M.many pTblFldUnique <*> pTblFldDefault)
 
-pExtName :: Parser (ExtTypName, MaybeFldExt)
+pExtName :: Parser (ExtTypName, FldExtIsMaybe)
 pExtName = lexeme ((,) <$> pNameUpper <*> (True <$ MC.char '?' <|> pure False))
 
 pField :: Parser Field
@@ -214,7 +239,7 @@ devIns = ["Eq", "Show", "Generic"]
 noDevIns :: [String]
 noDevIns = ["Default", "ToJSON", "FromJSON", "ToSchema"]
 
-ttRep :: TtRep -> (HM.HashMap TypName [(FldName, Maybe FldTitle, FldTypS, MaybeFldBas, Maybe FldSamp, MaybeFldExt)], [DevClsName])
+ttRep :: TtRep -> (HM.HashMap TypName [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)], [DevClsName])
 ttRep (TtRep (Combo basTypName _ devs) flds) =
   let hm = defBase basTypName (flds <&> (\(Field tupleNameTitle tup _ _) -> (tupleNameTitle, tup))) HM.empty
    in (defExts flds hm, devIns <> filter (`notElem` (devIns <> noDevIns)) (fromMaybe empty devs))
@@ -226,16 +251,42 @@ ttRep (TtRep (Combo basTypName _ devs) flds) =
       let m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _mFldBas, _mFldSamp, _mFldExt)) m
        in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _mFldBas, _mFldSamp) _mTblFld exTups : _flds) m'
 
-tbRep :: [Field] -> [(TblFldName, (FldTypS, MaybeFldBas), TblFldTypSW, TblFldTypSR)]
-tbRep = mapMaybe tblFld
+repOpaleye :: [Field] -> [(TblFldOName, (FldTypS, FldBasIsMaybe), TblFldOTypSW, TblFldOTypSR)]
+repOpaleye = mapMaybe go
   where
-    tblFld (Field (_fldName, _) (_fldTypS, _mFldBas, _mFldSamp) mTblFld _) = case mTblFld of
+    go (Field (_fldName, _) (_fldTypS, _mFldBas, _mFldSamp) mTblFld _) = case mTblFld of
       Nothing -> Nothing
-      Just _tblFld -> case _tblFld of
-        TblFldR _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
-        TblFldWR _tblFldTypSW _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
-        TblFldNR _tblFldName _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
-        TblFldNWR _tblFldName _tblFldTypSW _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
+      Just (TblFld _tblFld _ _ _) -> case _tblFld of
+        TblFldOR _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
+        TblFldOWR _tblFldTypSW _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
+        TblFldONR _tblFldName _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
+        TblFldONWR _tblFldName _tblFldTypSW _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
+
+repPersistent :: TtRep -> (TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)])
+repPersistent (TtRep _ flds) =
+  let primaryCons = TblPrimary (genPrimaryCons flds)
+      uniqueCons = genUniqueCons flds []
+      persistFlds = mapMaybe genPersistFld flds
+   in (primaryCons, uniqueCons, persistFlds)
+  where
+    genPrimaryCons = mapMaybe extractPrimary
+    extractPrimary (Field (_fldName, _) (_fldTypS, _mFldBas, _) mTblFld _) = case mTblFld of
+      Nothing -> Nothing
+      Just (TblFld _ isPrimary _ _def) -> if isPrimary then Just _fldName else Nothing
+    genUniqueCons [] uCons = uCons
+    genUniqueCons ((Field (_fldName, _) _ mTblFld _) : _flds) uCons = case mTblFld of
+      Nothing -> genUniqueCons _flds uCons
+      Just (TblFld _ _ uNames _) -> genUniqueCons _flds (extractUnique _fldName uNames uCons)
+    extractUnique _fldName [] uCons = uCons
+    extractUnique _fldName (uName : uNames) uCons = extractUnique _fldName uNames (extractUniqueOne _fldName uName uCons [])
+    extractUniqueOne _fldName uName [] uCons = reverse (TblUnique uName [_fldName] : uCons)
+    extractUniqueOne _fldName uName (uCon@(TblUnique uConName uConFlds) : uCons_) uCons =
+      if uName == uConName
+        then reverse uCons_ <> (TblUnique uConName (snoc uConFlds _fldName) : uCons)
+        else extractUniqueOne _fldName uName uCons_ (uCon : uCons)
+    genPersistFld (Field (_fldName, _) (_fldTypS, _mFldBas, _) mTblFld _) = case mTblFld of
+      Nothing -> Nothing
+      Just (TblFld _ _ _ _def) -> Just (_fldName, _fldTypS, _mFldBas, _def)
 
 -- tedious type
 tt :: QuasiQuoter
@@ -257,10 +308,10 @@ ttDec str = do
   let ttReps = tts <&> ttRep
   let reps = ttReps >>= (\(m, devs) -> HM.toList m <&> (\(n, flds) -> (n, devs, flds)))
   typDecs <- join <$> mapM repDec reps
-  tblDecs <- join <$> mapM tbDec tts
+  tblDecs <- join <$> mapM decOpaleye tts
   return (typDecs <> tblDecs)
   where
-    repDec :: (TypName, [DevClsName], [(FldName, Maybe FldTitle, FldTypS, MaybeFldBas, Maybe FldSamp, MaybeFldExt)]) -> Q [Dec]
+    repDec :: (TypName, [DevClsName], [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)]) -> Q [Dec]
     repDec (typName, _devClsNames, flds) = do
       let name = mkName typName
       let vbs =
@@ -331,11 +382,11 @@ ttDec str = do
     fldSchemaName :: FldName -> String
     fldSchemaName = ("schema" <>) . upperFirst
 
-tbDec :: TtRep -> Q [Dec]
-tbDec (TtRep (Combo basTypName tblName _) flds) = evalContT $ do
+decOpaleye :: TtRep -> Q [Dec]
+decOpaleye (TtRep (Combo basTypName tblName _) flds) = evalContT $ do
   callCC $ \exit -> do
     let funbasTypName = lowerFirst basTypName <> "Table"
-    let tblFlds = tbRep flds
+    let tblFlds = repOpaleye flds
     when (null tblFlds) $ exit mempty
     let wTyps = (`strToTyp` False) . sel3 <$> tblFlds
     let wFlds = genSigFields wTyps Nothing

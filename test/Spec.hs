@@ -52,3 +52,32 @@ tests = describe "Tedious.Parser" $ do
       `shouldBe` Right ("Maybe [Text]", False, Nothing)
     parse pFldTypTup "" "(Maybe (Maybe [Int]))"
       `shouldBe` Right ("Maybe (Maybe [Int])", False, Nothing)
+  it "pTblFld should work" $ do
+    parse pTblFld "" ""
+      `shouldBe` Right Nothing
+    parse pTblFld "" "(Field SqlInt8)"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") False [] Nothing))
+    parse pTblFld "" "(Field SqlInt8, Field SqlInt8)"
+      `shouldBe` Right (Just (TblFld (TblFldOWR "Field SqlInt8" "Field SqlInt8") False [] Nothing))
+    parse pTblFld "" "(\"name\", Field SqlInt8)"
+      `shouldBe` Right (Just (TblFld (TblFldONR "name" "Field SqlInt8") False [] Nothing))
+    parse pTblFld "" "(\"name\", Field SqlInt8, Field SqlInt8)"
+      `shouldBe` Right (Just (TblFld (TblFldONWR "name" "Field SqlInt8" "Field SqlInt8") False [] Nothing))
+    parse pTblFld "" "(Field SqlInt8)!"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True [] Nothing))
+    parse pTblFld "" "(Field SqlInt8)! default=3"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True [] (Just "default=3")))
+    parse pTblFld "" "(Field SqlInt8) !"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True [] Nothing))
+    parse pTblFld "" "(Field SqlInt8)! !uniqueOne"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True ["uniqueOne"] Nothing))
+    parse pTblFld "" "(Field SqlInt8)! !uniqueOne !uniqueTwo"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True ["uniqueOne", "uniqueTwo"] Nothing))
+    parse pTblFld "" "(Field SqlInt8)! !uniqueOne !uniqueTwo default=3"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") True ["uniqueOne", "uniqueTwo"] (Just "default=3")))
+    parse pTblFld "" "(Field SqlInt8) default=3"
+      `shouldBe` Right (Just (TblFld (TblFldOR "Field SqlInt8") False [] (Just "default=3")))
+  it "repPersistent should work" $ do
+    let ttRep = TtRep (Combo "Dog" Nothing Nothing) [Field ("name", Nothing) ("Text", False, Nothing) (Just (TblFld (TblFldOR "Field SqlInt8") True ["uniqueOne"] (Just "default='dog'"))) []]
+      in repPersistent ttRep
+          `shouldBe` Right ()

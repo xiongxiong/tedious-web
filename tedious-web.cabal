@@ -77,6 +77,7 @@ library
     , mtl
     , opaleye
     , openapi3
+    , persistent
     , postgresql-simple
     , product-profunctors
     , profunctors
@@ -138,6 +139,7 @@ executable tedious-web-exe
     , mtl
     , opaleye
     , openapi3
+    , persistent
     , postgresql-simple
     , product-profunctors
     , profunctors
@@ -203,6 +205,7 @@ test-suite tedious-web-test
     , mtl
     , opaleye
     , openapi3
+    , persistent
     , postgresql-simple
     , product-profunctors
     , profunctors

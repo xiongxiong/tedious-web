@@ -35,6 +35,7 @@ dependencies:
 - mtl
 - opaleye
 - openapi3
+- persistent
 - postgresql-simple
 - product-profunctors
 - profunctors
