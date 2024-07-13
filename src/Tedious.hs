@@ -3,6 +3,7 @@ module Tedious
     module Tedious.Util,
     module Tedious.Entity,
     module Tedious.Handler,
+    module Tedious.Orphan
   )
 where
 
@@ -10,3 +11,4 @@ import Tedious.Entity
 import Tedious.Handler
 import Tedious.Parser
 import Tedious.Util
+import Tedious.Orphan

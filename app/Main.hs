@@ -20,23 +20,23 @@ import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Encoding (decodeUtf8)
 import GHC.Generics (Generic)
 import Opaleye (Field, FieldNullable, SqlText, SqlTimestamptz)
-import Tedious (tt)
+import Tedious (tedious)
 import Text.RawString.QQ (r)
 import Data.Time (UTCTime)
 
-[tt|
-  -- Dog table "my_dog" deriving Exception persistUpper -- dog
-  --   id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)!
-  --   firstName `first name` Text `Wang` ("first_name", Field SqlText) !unique_dog !unique_dog_master DogA DogC
-  --   secondName `second name` Text `Ji Rong` ("second_name", Maybe (Field SqlText), Field SqlText) !unique_dog DogA
-  --   address `home address` Text `Beijing` (Maybe (Field Text), Field Text) DogA -- where the dog is live in
-  --   master `master's name` Text? (FieldNullable Text) !unique_dog_master default='the lord' DogA DogB? -- master
-  --   masterAge `master's age` Int `26` DogC -- age of dog's master
-  --   age `dog's age` Int `8` DogA DogB?
-  --   hobby `dog's hobby` (Maybe Text)? `Just "meat"` (FieldNullable Text) DogC? DogB
-  --   color `dog's color` ((Text, Text, Text)) default='white' DogB DogC
-  --   friends `dog's friends` [Text] DogC
-  --   createdAt `creation time` UTCTime ("cteated_at", Maybe (FieldNullable SqlTimestamptz), FieldNullable SqlTimestamptz) default=CURRENT_TIMESTAMP DogB DogC?
+[tedious|
+  Dog table "my_dog" deriving Exception persistUpperCase -- dog
+    id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)!
+    firstName `first name` Text `Wang` ("first_name", Field SqlText) !unique_dog !unique_dog_master DogA DogC
+    secondName `second name` Text `Ji Rong` ("second_name", Maybe (Field SqlText), Field SqlText) !unique_dog DogA
+    address `home address` Text `Beijing` (Maybe (Field Text), Field Text) DogA -- where the dog is live in
+    master `master's name` Text? (FieldNullable Text) !unique_dog_master default='the lord' DogA DogB? -- master
+    masterAge `master's age` Int `26` DogC -- age of dog's master
+    age `dog's age` Int `8` DogA DogB?
+    hobby `dog's hobby` (Maybe Text)? `Just "meat"` (FieldNullable Text) DogC? DogB
+    color `dog's color` ((Text, Text, Text)) default='white' DogB DogC
+    friends `dog's friends` [Text] DogC
+    createdAt `creation time` UTCTime ("cteated_at", Maybe (FieldNullable SqlTimestamptz), FieldNullable SqlTimestamptz) default=CURRENT_TIMESTAMP DogB DogC?
 
   Cat
     name Text CatA CatC

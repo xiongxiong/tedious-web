@@ -24,10 +24,10 @@ import Effectful.Error.Dynamic (Error, runErrorWith)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 import Opaleye (Field, FieldNullable, SqlInt8, SqlText, SqlTimestamptz)
-import Tedious.Parser (tt)
+import Tedious.Parser (tedious)
 import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
-[tt|
+[tedious|
 Page
   index `页码` Natural `1`
   size `每页条数` Natural `10`

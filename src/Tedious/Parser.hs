@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
-module Tedious.Parser where
+module TediousTyp.Parser where
 
 import Control.Lens (declareLensesWith, lensRules)
 import Control.Lens qualified as L
@@ -16,7 +16,7 @@ import Data.Functor (void, (<&>))
 import Data.HashMap.Strict qualified as HM
 import Data.HashMap.Strict.InsOrd qualified as IHM
 import Data.List.Extra (snoc)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.OpenApi (HasExample (..), HasProperties (..), HasRequired (..), HasTitle (..), HasType (..), OpenApiType (..), ToSchema, declareSchemaRef)
 import Data.OpenApi qualified as O
 import Data.OpenApi.Internal.Schema (named)
@@ -36,13 +36,11 @@ import Text.Megaparsec qualified as M
 import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
 
--- TODO: persistUpper, combo arbitrary keyword pos
-
 type TypName = String
 
 type BasTypName = String
 
-type DevClsName = String
+type DevTypName = String
 
 type ExtTypName = String
 
@@ -74,13 +72,28 @@ type TblFldDefault = String
 
 type TblUniqueName = String
 
+type MigrateName = String
+
+type RepTediousFields = [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)]
+
+type RepOpaleye = [(TblFldOName, (FldTypS, FldBasIsMaybe), TblFldOTypSW, TblFldOTypSR)]
+
+type RepPersist = (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)])
+
 --
 
 data Combo
   = Combo
       BasTypName -- base type name
       (Maybe TblName) -- table name
-      (Maybe [DevClsName]) -- derivings
+      (Maybe [DevTypName]) -- derivings
+      (Maybe PersistSetting)
+  deriving stock (Eq, Show, Generic)
+
+data PersistSetting = PersistUpperCase | PersistLowerCase
+  deriving stock (Eq, Show, Generic)
+
+data ComboAttr = ComboTblName TblName | ComboDevTyp [DevTypName] | ComboPersist PersistSetting
   deriving stock (Eq, Show, Generic)
 
 data Field
@@ -107,7 +120,11 @@ newtype TblPrimary = TblPrimary [FldName]
 data TblUnique = TblUnique TblUniqueName [FldName]
   deriving stock (Eq, Show, Generic)
 
-data TtRep = TtRep Combo [Field] deriving stock (Eq, Show, Generic)
+data TediousTyp = TediousTyp Combo [Field]
+  deriving stock (Eq, Show, Generic)
+
+data Tedious = Tedious (Maybe MigrateName) [TediousTyp]
+  deriving stock (Eq, Show, Generic)
 
 --
 
@@ -116,11 +133,11 @@ type Parser = Parsec Void String
 lineComment :: Parser ()
 lineComment = MCL.skipLineComment "--"
 
-scn :: Parser ()
-scn = MCL.space MC.space1 lineComment empty
-
 sc :: Parser ()
 sc = MCL.space (void $ M.some (MC.char ' ' <|> MC.char '\t')) lineComment empty
+
+scn :: Parser ()
+scn = MCL.space MC.space1 lineComment empty
 
 lexeme :: Parser a -> Parser a
 lexeme = MCL.lexeme sc
@@ -137,8 +154,8 @@ pNameLower = lexeme ((<>) <$> takeWhile1P Nothing isLowerCase <*> takeWhileP Not
 pNameUpper :: Parser String
 pNameUpper = lexeme ((<>) <$> takeWhile1P Nothing isUpperCase <*> takeWhileP Nothing isNameChar)
 
-pString :: Parser (Maybe String)
-pString = optional . lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
+pString :: Parser String
+pString = lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
 
 symbol :: String -> Parser String
 symbol = MCL.symbol sc
@@ -164,23 +181,42 @@ quotes = between (symbol "\"") (symbol "\"")
 backQuotes :: Parser a -> Parser a
 backQuotes = between (symbol "`") (symbol "`")
 
-pTbl :: Parser (Maybe TblName)
-pTbl = optional $ lexeme (MC.string "table") *> quotes pName
+pTblName :: Parser TblName
+pTblName = lexeme (MC.string "table") *> quotes pName
 
-pDev :: Parser (Maybe [DevClsName])
-pDev = optional $ lexeme (MC.string "deriving") *> lexeme (M.some pNameUpper)
+pDevTyp :: Parser [DevTypName]
+pDevTyp = lexeme (MC.string "deriving") *> lexeme (M.some pNameUpper)
+
+pPersist :: Parser PersistSetting
+pPersist = do
+  s <- lexeme $ MC.string "persistUpperCase" <|> MC.string "persistLowerCase"
+  case s of
+    "persistUpperCase" -> pure PersistUpperCase
+    "persistLowerCase" -> pure PersistLowerCase
+    _ -> fail "parse combo persist : not supported"
+
+pComboAttr :: Parser ComboAttr
+pComboAttr = (ComboTblName <$> pTblName) <|> (ComboDevTyp <$> pDevTyp) <|> (ComboPersist <$> pPersist)
+
+pComboAttrs :: Parser (Maybe TblName, Maybe [DevTypName], Maybe PersistSetting)
+pComboAttrs = do
+  attrs <- M.many pComboAttr
+  let attrTblName = listToMaybe $ mapMaybe (\case (ComboTblName tblName) -> Just tblName; _ -> Nothing) attrs
+  let attrDevTyp = listToMaybe $ mapMaybe (\case (ComboDevTyp devTyps) -> Just devTyps; _ -> Nothing) attrs
+  let attrPersist = listToMaybe $ mapMaybe (\case (ComboPersist persist) -> Just persist; _ -> Nothing) attrs
+  pure (attrTblName, attrDevTyp, attrPersist)
 
 pCombo :: Parser Combo
-pCombo = Combo <$> pNameUpper <*> pTbl <*> pDev
+pCombo = uncurryN . Combo <$> pNameUpper <*> pComboAttrs
 
 pFldName :: Parser FldName
 pFldName = pNameLower
 
-pFldTitle :: Parser (Maybe FldLabel)
+pFldTitle :: Parser FldLabel
 pFldTitle = pString
 
 pFldNameAndTitle :: Parser (FldName, Maybe FldLabel)
-pFldNameAndTitle = (,) <$> pFldName <*> pFldTitle
+pFldNameAndTitle = (,) <$> pFldName <*> optional pFldTitle
 
 pFldTyp :: Parser FldTypS
 pFldTyp =
@@ -190,7 +226,7 @@ pFldTyp =
     <|> try pTuple
     <|> (unwords <$> M.some pNameUpper)
 
-pFldSamp :: Parser (Maybe FldSamp)
+pFldSamp :: Parser FldSamp
 pFldSamp = pString
 
 pOccur :: String -> Parser Bool
@@ -199,37 +235,50 @@ pOccur s = True <$ symbol s <|> pure False
 pFldTypTup :: Parser (FldTypS, FldBasIsMaybe, Maybe FldSamp)
 pFldTypTup = do
   (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp) <*> pOccur "?")
-  _mFldSamp <- pFldSamp
+  _mFldSamp <- optional pFldSamp
   pure (_fldTypS, _mFldBas, _mFldSamp)
 
 pTblFldUnique :: Parser TblFldUnique
-pTblFldUnique = lexeme $ MC.char '!' *> pName
+pTblFldUnique = lexeme $ MC.char '!' *> pNameUpper
 
-pTblFldDefault :: Parser (Maybe String)
-pTblFldDefault = optional . lexeme $ (<>) <$> MC.string "default=" <*> takeWhile1P Nothing (not . isSpace)
+pTblFldDefault :: Parser String
+pTblFldDefault = lexeme $ (<>) <$> MC.string "default=" <*> takeWhile1P Nothing (not . isSpace)
 
-pTblFld :: Parser (Maybe TblFld)
+pTblFld :: Parser TblFld
 pTblFld =
-  optional $
-    pFldP (parens (TblFldOR <$> pFldO))
+  pFldP (parens (TblFldOR <$> pFldO))
       <|> pFldP (parens (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
       <|> pFldP (parens (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
       <|> pFldP (parens (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
   where
     pFldO = unwords <$> (((<>) . pure <$> (symbol "FieldNullable" <|> symbol "Field")) <*> (pure <$> pNameUpper))
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
-    pFldP p = try (TblFld <$> p <*> pOccur "!" <*> M.many pTblFldUnique <*> pTblFldDefault)
+    pFldP p = try (TblFld <$> p <*> pOccur "!" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
 
 pExtName :: Parser (ExtTypName, FldExtIsMaybe)
 pExtName = lexeme ((,) <$> pNameUpper <*> (True <$ MC.char '?' <|> pure False))
 
 pField :: Parser Field
-pField = Field <$> pFldNameAndTitle <*> pFldTypTup <*> pTblFld <*> M.many pExtName
+pField = Field <$> pFldNameAndTitle <*> pFldTypTup <*> optional pTblFld <*> M.many pExtName
 
-pTt :: Parser [TtRep]
-pTt = M.many . MCL.indentBlock scn $ do
-  combo <- pCombo
-  return $ MCL.IndentSome Nothing (return . TtRep combo) pField
+pMigrateName :: Parser MigrateName
+pMigrateName = lexeme (MC.string "migrate") *> pNameLower
+
+pTediousTyp :: Parser TediousTyp
+pTediousTyp = MCL.indentBlock scn $ do
+      combo <- pCombo
+      return $ MCL.IndentSome Nothing (return . TediousTyp combo) pField
+
+pTediousTyps :: Parser [TediousTyp]
+pTediousTyps = M.many pTediousTyp
+
+pTedious :: Parser Tedious
+pTedious = pAnName <|> pNoName
+  where
+    pAnName = MCL.indentBlock scn $ do
+          migrateName <- pMigrateName
+          return $ MCL.IndentSome Nothing (return . Tedious (Just migrateName)) pTediousTyp
+    pNoName = Tedious Nothing <$> pTediousTyps
 
 --
 
@@ -239,8 +288,8 @@ devIns = ["Eq", "Show", "Generic"]
 noDevIns :: [String]
 noDevIns = ["Default", "ToJSON", "FromJSON", "ToSchema"]
 
-ttRep :: TtRep -> (HM.HashMap TypName [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)], [DevClsName])
-ttRep (TtRep (Combo basTypName _ devs) flds) =
+repTediousTyp :: TediousTyp -> (HM.HashMap TypName RepTediousFields, [DevTypName])
+repTediousTyp (TediousTyp (Combo basTypName _ devs _) flds) =
   let hm = defBase basTypName (flds <&> (\(Field tupleNameTitle tup _ _) -> (tupleNameTitle, tup))) HM.empty
    in (defExts flds hm, devIns <> filter (`notElem` (devIns <> noDevIns)) (fromMaybe empty devs))
   where
@@ -251,7 +300,7 @@ ttRep (TtRep (Combo basTypName _ devs) flds) =
       let m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _mFldBas, _mFldSamp, _mFldExt)) m
        in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _mFldBas, _mFldSamp) _mTblFld exTups : _flds) m'
 
-repOpaleye :: [Field] -> [(TblFldOName, (FldTypS, FldBasIsMaybe), TblFldOTypSW, TblFldOTypSR)]
+repOpaleye :: [Field] -> RepOpaleye
 repOpaleye = mapMaybe go
   where
     go (Field (_fldName, _) (_fldTypS, _mFldBas, _mFldSamp) mTblFld _) = case mTblFld of
@@ -262,12 +311,12 @@ repOpaleye = mapMaybe go
         TblFldONR _tblFldName _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
         TblFldONWR _tblFldName _tblFldTypSW _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
 
-repPersistent :: TtRep -> (TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)])
-repPersistent (TtRep _ flds) =
+repPersistent :: TediousTyp -> RepPersist
+repPersistent (TediousTyp (Combo basTypName _ _ _) flds) =
   let primaryCons = TblPrimary (genPrimaryCons flds)
       uniqueCons = genUniqueCons flds []
       persistFlds = mapMaybe genPersistFld flds
-   in (primaryCons, uniqueCons, persistFlds)
+   in (basTypName, primaryCons, uniqueCons, persistFlds)
   where
     genPrimaryCons = mapMaybe extractPrimary
     extractPrimary (Field (_fldName, _) (_fldTypS, _mFldBas, _) mTblFld _) = case mTblFld of
@@ -288,30 +337,38 @@ repPersistent (TtRep _ flds) =
       Nothing -> Nothing
       Just (TblFld _ _ _ _def) -> Just (_fldName, _fldTypS, _mFldBas, _def)
 
--- tedious type
-tt :: QuasiQuoter
-tt =
+strPersistent :: (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)]) -> String
+strPersistent (basTypName, TblPrimary pNames, uCons, tblFlds) =
+  let primaryLine = unwords $ "Primary" : pNames
+      uniqueLines = uCons <&> (\(TblUnique uConName uConFlds) -> unwords $ ("Unique" <> uConName) : uConFlds)
+      tblFldLines = tblFlds <&> (\(fldName, fldTypS, fldBasIsMaybe, mTblFldDef) -> unwords . catMaybes $ [Just fldName, Just fldTypS, if fldBasIsMaybe then Just "Maybe" else Nothing, mTblFldDef])
+   in unlines $ pure basTypName <> (indent 1 <$> (tblFldLines <> pure primaryLine <> uniqueLines))
+  where
+    indent n s = replicate n '\t' <> s
+
+tedious :: QuasiQuoter
+tedious =
   QuasiQuoter
-    { quoteExp = error "tt cannot be used as exp",
-      quotePat = error "tt cannot be used as pat",
-      quoteType = error "tt cannot be used as type",
-      quoteDec = ttDec
+    { quoteExp = error "tedious cannot be used as exp",
+      quotePat = error "tedious cannot be used as pat",
+      quoteType = error "tedious cannot be used as type",
+      quoteDec = decTedious
     }
 
-ttDec ::
+decTedious ::
   String ->
   Q [Dec]
-ttDec str = do
-  let tts = case parse pTt "" str of
+decTedious str = do
+  let tts = case parse pTedious "" str of
         Left b -> fail (errorBundlePretty b)
-        Right v -> v
-  let ttReps = tts <&> ttRep
-  let reps = ttReps >>= (\(m, devs) -> HM.toList m <&> (\(n, flds) -> (n, devs, flds)))
+        Right (Tedious _ tts_) -> tts_
+  let repTts = tts <&> repTediousTyp
+  let reps = repTts >>= (\(m, devs) -> HM.toList m <&> (\(n, flds) -> (n, devs, flds)))
   typDecs <- join <$> mapM repDec reps
   tblDecs <- join <$> mapM decOpaleye tts
   return (typDecs <> tblDecs)
   where
-    repDec :: (TypName, [DevClsName], [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)]) -> Q [Dec]
+    repDec :: (TypName, [DevTypName], RepTediousFields) -> Q [Dec]
     repDec (typName, _devClsNames, flds) = do
       let name = mkName typName
       let vbs =
@@ -382,8 +439,8 @@ ttDec str = do
     fldSchemaName :: FldName -> String
     fldSchemaName = ("schema" <>) . upperFirst
 
-decOpaleye :: TtRep -> Q [Dec]
-decOpaleye (TtRep (Combo basTypName tblName _) flds) = evalContT $ do
+decOpaleye :: TediousTyp -> Q [Dec]
+decOpaleye (TediousTyp (Combo basTypName tblName _ _) flds) = evalContT $ do
   callCC $ \exit -> do
     let funbasTypName = lowerFirst basTypName <> "Table"
     let tblFlds = repOpaleye flds
@@ -404,11 +461,14 @@ decOpaleye (TtRep (Combo basTypName tblName _) flds) = evalContT $ do
     genSigFields [] Nothing = return $ ConT ''()
     genFunFields es | length es > 1 = tupE es
     genFunFields [e] = parensE e
-    genFunFields _ = fail "makeTable: empty flds"
+    genFunFields _ = fail "makeTable : empty flds"
+
+decPersist :: String -> [Dec]
+decPersist s = []
 
 strToTyp :: String -> Bool -> Type
 strToTyp s m =
-  let ot = either (error "ttDec: cannot parse field type") id (parseType s)
+  let ot = either (error "decTedious: cannot parse field type") id (parseType s)
    in if m then AppT (ConT ''Maybe) ot else ot
 
 isMaybeTyp :: Type -> Bool
