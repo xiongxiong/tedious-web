@@ -22,7 +22,10 @@ import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage),
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
-withDoc summ descr handler = setDescription descr <<< setSummary summ <<< handler
+withDoc summ desc handler = setDescription desc <<< setSummary summ <<< handler
+
+withDoc' :: (Handler h m) => Summary -> Middleware h ts ts
+withDoc' summ handler = setSummary summ <<< handler
 
 errorHandler ::
   ( Show e,
