@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           tedious-web
-version:        0.1.0.7
+version:        0.2.0.1
 description:    Please see the README on GitHub at <https://github.com/githubuser/tedious-web#readme>
 homepage:       https://github.com/githubuser/tedious-web#readme
 bug-reports:    https://github.com/githubuser/tedious-web/issues
@@ -94,6 +94,7 @@ library
 executable tedious-web-exe
   main-is: Main.hs
   other-modules:
+      Lib
       Paths_tedious_web
   autogen-modules:
       Paths_tedious_web

@@ -1,6 +1,7 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
-module TediousTyp.Parser where
+module Tedious.Parser where
 
 import Control.Lens (declareLensesWith, lensRules)
 import Control.Lens qualified as L
@@ -9,7 +10,7 @@ import Control.Monad.Cont (MonadCont (..), evalContT)
 import Control.Monad.Trans (lift)
 import Data.Aeson (FromJSON (..), ToJSON (..), genericParseJSON, genericToEncoding, genericToJSON)
 import Data.Aeson qualified as A
-import Data.Char (isAlphaNum, isLowerCase, isPrint, isSpace, isUpperCase)
+import Data.Char (isAlphaNum, isLowerCase, isPrint, isUpperCase)
 import Data.Default (Default (..))
 import Data.Function as F
 import Data.Functor (void, (<&>))
@@ -25,7 +26,7 @@ import Data.Tuple.All (Curry (..), Sel1 (sel1), Sel3 (sel3), Sel4 (sel4))
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Meta (parseType)
-import Language.Haskell.TH (Body (NormalB), Clause (Clause), Dec (..), DerivStrategy (..), Exp (..), Pat (WildP), Q, Type (AppT, ConT, TupleT), appE, appT, bang, bangType, bindS, clause, conE, conT, dataD, derivClause, doE, funD, listE, litE, mkName, newtypeD, noBindS, noSourceStrictness, noSourceUnpackedness, normalB, parensE, recC, sigD, sigE, stringE, stringL, tupE, uInfixE, varBangType, varE, varP)
+import Language.Haskell.TH
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Opaleye (table, tableField)
 import Opaleye.Table (Table)
@@ -72,13 +73,11 @@ type TblFldDefault = String
 
 type TblUniqueName = String
 
-type MigrateName = String
-
 type RepTediousFields = [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)]
 
 type RepOpaleye = [(TblFldOName, (FldTypS, FldBasIsMaybe), TblFldOTypSW, TblFldOTypSR)]
 
-type RepPersist = (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)])
+type RepPersistTyp = (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)])
 
 --
 
@@ -87,13 +86,9 @@ data Combo
       BasTypName -- base type name
       (Maybe TblName) -- table name
       (Maybe [DevTypName]) -- derivings
-      (Maybe PersistSetting)
   deriving stock (Eq, Show, Generic)
 
-data PersistSetting = PersistUpperCase | PersistLowerCase
-  deriving stock (Eq, Show, Generic)
-
-data ComboAttr = ComboTblName TblName | ComboDevTyp [DevTypName] | ComboPersist PersistSetting
+data ComboAttr = ComboTblName TblName | ComboDevTyp [DevTypName]
   deriving stock (Eq, Show, Generic)
 
 data Field
@@ -121,9 +116,6 @@ data TblUnique = TblUnique TblUniqueName [FldName]
   deriving stock (Eq, Show, Generic)
 
 data TediousTyp = TediousTyp Combo [Field]
-  deriving stock (Eq, Show, Generic)
-
-data Tedious = Tedious (Maybe MigrateName) [TediousTyp]
   deriving stock (Eq, Show, Generic)
 
 --
@@ -154,9 +146,6 @@ pNameLower = lexeme ((<>) <$> takeWhile1P Nothing isLowerCase <*> takeWhileP Not
 pNameUpper :: Parser String
 pNameUpper = lexeme ((<>) <$> takeWhile1P Nothing isUpperCase <*> takeWhileP Nothing isNameChar)
 
-pString :: Parser String
-pString = lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
-
 symbol :: String -> Parser String
 symbol = MCL.symbol sc
 
@@ -167,7 +156,19 @@ parens' :: Parser String -> Parser String
 parens' p = join <$> sequence [pure "(", between (symbol "(") (symbol ")") p, pure ")"]
 
 pTuple :: Parser String
-pTuple = join <$> sequence [pure "(", between (symbol "(") (symbol ")") ((<>) <$> ((unwords <$> M.some pNameUpper) <|> pTuple) <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTuple)))))), pure ")"]
+pTuple =
+  join
+    <$> sequence
+      [ pure "(",
+        between
+          (symbol "(")
+          (symbol ")")
+          ( (<>)
+              <$> ((unwords <$> M.some pNameUpper) <|> pTuple)
+              <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTuple)))))
+          ),
+        pure ")"
+      ]
 
 brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")
@@ -181,30 +182,24 @@ quotes = between (symbol "\"") (symbol "\"")
 backQuotes :: Parser a -> Parser a
 backQuotes = between (symbol "`") (symbol "`")
 
+backQuoteString :: Parser String
+backQuoteString = lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
+
 pTblName :: Parser TblName
 pTblName = lexeme (MC.string "table") *> quotes pName
 
 pDevTyp :: Parser [DevTypName]
 pDevTyp = lexeme (MC.string "deriving") *> lexeme (M.some pNameUpper)
 
-pPersist :: Parser PersistSetting
-pPersist = do
-  s <- lexeme $ MC.string "persistUpperCase" <|> MC.string "persistLowerCase"
-  case s of
-    "persistUpperCase" -> pure PersistUpperCase
-    "persistLowerCase" -> pure PersistLowerCase
-    _ -> fail "parse combo persist : not supported"
-
 pComboAttr :: Parser ComboAttr
-pComboAttr = (ComboTblName <$> pTblName) <|> (ComboDevTyp <$> pDevTyp) <|> (ComboPersist <$> pPersist)
+pComboAttr = (ComboTblName <$> pTblName) <|> (ComboDevTyp <$> pDevTyp)
 
-pComboAttrs :: Parser (Maybe TblName, Maybe [DevTypName], Maybe PersistSetting)
+pComboAttrs :: Parser (Maybe TblName, Maybe [DevTypName])
 pComboAttrs = do
   attrs <- M.many pComboAttr
   let attrTblName = listToMaybe $ mapMaybe (\case (ComboTblName tblName) -> Just tblName; _ -> Nothing) attrs
   let attrDevTyp = listToMaybe $ mapMaybe (\case (ComboDevTyp devTyps) -> Just devTyps; _ -> Nothing) attrs
-  let attrPersist = listToMaybe $ mapMaybe (\case (ComboPersist persist) -> Just persist; _ -> Nothing) attrs
-  pure (attrTblName, attrDevTyp, attrPersist)
+  pure (attrTblName, attrDevTyp)
 
 pCombo :: Parser Combo
 pCombo = uncurryN . Combo <$> pNameUpper <*> pComboAttrs
@@ -213,7 +208,7 @@ pFldName :: Parser FldName
 pFldName = pNameLower
 
 pFldTitle :: Parser FldLabel
-pFldTitle = pString
+pFldTitle = backQuoteString
 
 pFldNameAndTitle :: Parser (FldName, Maybe FldLabel)
 pFldNameAndTitle = (,) <$> pFldName <*> optional pFldTitle
@@ -227,33 +222,34 @@ pFldTyp =
     <|> (unwords <$> M.some pNameUpper)
 
 pFldSamp :: Parser FldSamp
-pFldSamp = pString
+pFldSamp = backQuoteString
 
 pOccur :: String -> Parser Bool
-pOccur s = True <$ symbol s <|> pure False
+pOccur s = lexeme $ (True <$ symbol s) <|> pure False
 
 pFldTypTup :: Parser (FldTypS, FldBasIsMaybe, Maybe FldSamp)
 pFldTypTup = do
-  (_fldTypS, _mFldBas) <- lexeme ((,) <$> (pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp) <*> pOccur "?")
+  _fldTypS <- lexeme $ pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp
+  _fldBasIsM <- pOccur "?"
   _mFldSamp <- optional pFldSamp
-  pure (_fldTypS, _mFldBas, _mFldSamp)
+  pure (_fldTypS, _fldBasIsM, _mFldSamp)
 
 pTblFldUnique :: Parser TblFldUnique
 pTblFldUnique = lexeme $ MC.char '!' *> pNameUpper
 
 pTblFldDefault :: Parser String
-pTblFldDefault = lexeme $ (<>) <$> MC.string "default=" <*> takeWhile1P Nothing (not . isSpace)
+pTblFldDefault = lexeme $ (<>) <$> MC.string "default=" *> backQuoteString
 
 pTblFld :: Parser TblFld
 pTblFld =
   pFldP (parens (TblFldOR <$> pFldO))
-      <|> pFldP (parens (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
-      <|> pFldP (parens (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
-      <|> pFldP (parens (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
+    <|> pFldP (parens (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
+    <|> pFldP (parens (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
+    <|> pFldP (parens (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
   where
     pFldO = unwords <$> (((<>) . pure <$> (symbol "FieldNullable" <|> symbol "Field")) <*> (pure <$> pNameUpper))
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
-    pFldP p = try (TblFld <$> p <*> pOccur "!" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
+    pFldP p = try (TblFld <$> p <*> pOccur "#" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
 
 pExtName :: Parser (ExtTypName, FldExtIsMaybe)
 pExtName = lexeme ((,) <$> pNameUpper <*> (True <$ MC.char '?' <|> pure False))
@@ -261,24 +257,13 @@ pExtName = lexeme ((,) <$> pNameUpper <*> (True <$ MC.char '?' <|> pure False))
 pField :: Parser Field
 pField = Field <$> pFldNameAndTitle <*> pFldTypTup <*> optional pTblFld <*> M.many pExtName
 
-pMigrateName :: Parser MigrateName
-pMigrateName = lexeme (MC.string "migrate") *> pNameLower
-
 pTediousTyp :: Parser TediousTyp
 pTediousTyp = MCL.indentBlock scn $ do
-      combo <- pCombo
-      return $ MCL.IndentSome Nothing (return . TediousTyp combo) pField
+  combo <- pCombo
+  return $ MCL.IndentSome Nothing (return . TediousTyp combo) pField
 
 pTediousTyps :: Parser [TediousTyp]
 pTediousTyps = M.many pTediousTyp
-
-pTedious :: Parser Tedious
-pTedious = pAnName <|> pNoName
-  where
-    pAnName = MCL.indentBlock scn $ do
-          migrateName <- pMigrateName
-          return $ MCL.IndentSome Nothing (return . Tedious (Just migrateName)) pTediousTyp
-    pNoName = Tedious Nothing <$> pTediousTyps
 
 --
 
@@ -289,37 +274,37 @@ noDevIns :: [String]
 noDevIns = ["Default", "ToJSON", "FromJSON", "ToSchema"]
 
 repTediousTyp :: TediousTyp -> (HM.HashMap TypName RepTediousFields, [DevTypName])
-repTediousTyp (TediousTyp (Combo basTypName _ devs _) flds) =
+repTediousTyp (TediousTyp (Combo basTypName _ devs) flds) =
   let hm = defBase basTypName (flds <&> (\(Field tupleNameTitle tup _ _) -> (tupleNameTitle, tup))) HM.empty
    in (defExts flds hm, devIns <> filter (`notElem` (devIns <> noDevIns)) (fromMaybe empty devs))
   where
     defBase _basTypName tuples = HM.insert _basTypName (tuples <&> (\((_fldName, _mFldTitle), (_fldTypS, _maybeFldBas, _mFldSamp)) -> (_fldName, _mFldTitle, _fldTypS, _maybeFldBas, _mFldSamp, False)))
     defExts [] m = m
     defExts (Field _ _ _ [] : ds) m = defExts ds m
-    defExts (Field (_fldName, _mFldTitle) (_fldTypS, _mFldBas, _mFldSamp) _mTblFld ((_extTypName, _mFldExt) : exTups) : _flds) m =
-      let m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _mFldBas, _mFldSamp, _mFldExt)) m
-       in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _mFldBas, _mFldSamp) _mTblFld exTups : _flds) m'
+    defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld ((_extTypName, _fldExtIsM) : exTups) : _flds) m =
+      let m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM)) m
+       in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld exTups : _flds) m'
 
 repOpaleye :: [Field] -> RepOpaleye
 repOpaleye = mapMaybe go
   where
-    go (Field (_fldName, _) (_fldTypS, _mFldBas, _mFldSamp) mTblFld _) = case mTblFld of
+    go (Field (_fldName, _) (_fldTypS, _fldBasIsM, _mFldSamp) mTblFld _) = case mTblFld of
       Nothing -> Nothing
       Just (TblFld _tblFld _ _ _) -> case _tblFld of
-        TblFldOR _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
-        TblFldOWR _tblFldTypSW _tblFldTypSR -> Just (_fldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
-        TblFldONR _tblFldName _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSR, _tblFldTypSR)
-        TblFldONWR _tblFldName _tblFldTypSW _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _mFldBas), _tblFldTypSW, _tblFldTypSR)
+        TblFldOR _tblFldTypSR -> Just (_fldName, (_fldTypS, _fldBasIsM), _tblFldTypSR, _tblFldTypSR)
+        TblFldOWR _tblFldTypSW _tblFldTypSR -> Just (_fldName, (_fldTypS, _fldBasIsM), _tblFldTypSW, _tblFldTypSR)
+        TblFldONR _tblFldName _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _fldBasIsM), _tblFldTypSR, _tblFldTypSR)
+        TblFldONWR _tblFldName _tblFldTypSW _tblFldTypSR -> Just (_tblFldName, (_fldTypS, _fldBasIsM), _tblFldTypSW, _tblFldTypSR)
 
-repPersistent :: TediousTyp -> RepPersist
-repPersistent (TediousTyp (Combo basTypName _ _ _) flds) =
+repPersistTyp :: TediousTyp -> RepPersistTyp
+repPersistTyp (TediousTyp (Combo basTypName _ _) flds) =
   let primaryCons = TblPrimary (genPrimaryCons flds)
       uniqueCons = genUniqueCons flds []
       persistFlds = mapMaybe genPersistFld flds
    in (basTypName, primaryCons, uniqueCons, persistFlds)
   where
     genPrimaryCons = mapMaybe extractPrimary
-    extractPrimary (Field (_fldName, _) (_fldTypS, _mFldBas, _) mTblFld _) = case mTblFld of
+    extractPrimary (Field (_fldName, _) (_fldTypS, _fldBasIsM, _) mTblFld _) = case mTblFld of
       Nothing -> Nothing
       Just (TblFld _ isPrimary _ _def) -> if isPrimary then Just _fldName else Nothing
     genUniqueCons [] uCons = uCons
@@ -333,16 +318,29 @@ repPersistent (TediousTyp (Combo basTypName _ _ _) flds) =
       if uName == uConName
         then reverse uCons_ <> (TblUnique uConName (snoc uConFlds _fldName) : uCons)
         else extractUniqueOne _fldName uName uCons_ (uCon : uCons)
-    genPersistFld (Field (_fldName, _) (_fldTypS, _mFldBas, _) mTblFld _) = case mTblFld of
+    genPersistFld (Field (_fldName, _) (_fldTypS, _fldBasIsM, _) mTblFld _) = case mTblFld of
       Nothing -> Nothing
-      Just (TblFld _ _ _ _def) -> Just (_fldName, _fldTypS, _mFldBas, _def)
+      Just (TblFld _ _ _ _def) ->
+        if _fldName == "id" && _fldTypS == "Int64"
+          then Nothing
+          else Just (_fldName, wrapperParens _fldTypS, _fldBasIsM, _def)
+    wrapperParens s =
+      if length (words s) > 1
+        then "(" <> s <> ")"
+        else s
 
-strPersistent :: (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, FldBasIsMaybe, Maybe TblFldDefault)]) -> String
-strPersistent (basTypName, TblPrimary pNames, uCons, tblFlds) =
-  let primaryLine = unwords $ "Primary" : pNames
+strPersistTyp :: RepPersistTyp -> Maybe String
+strPersistTyp (basTypName, TblPrimary pNames, uCons, tblFlds) =
+  let primaryLine = if null pNames then Nothing else Just . unwords $ "Primary" : pNames
       uniqueLines = uCons <&> (\(TblUnique uConName uConFlds) -> unwords $ ("Unique" <> uConName) : uConFlds)
-      tblFldLines = tblFlds <&> (\(fldName, fldTypS, fldBasIsMaybe, mTblFldDef) -> unwords . catMaybes $ [Just fldName, Just fldTypS, if fldBasIsMaybe then Just "Maybe" else Nothing, mTblFldDef])
-   in unlines $ pure basTypName <> (indent 1 <$> (tblFldLines <> pure primaryLine <> uniqueLines))
+      tblFldLines =
+        tblFlds
+          <&> ( \(fldName, fldTypS, fldBasIsMaybe, mTblFldDef) ->
+                  unwords . catMaybes $ [Just fldName, Just fldTypS, if fldBasIsMaybe then Just "Maybe" else Nothing, ("default=" <>) <$> mTblFldDef]
+              )
+   in if null tblFldLines
+        then Nothing
+        else Just . unlines $ pure basTypName <> (indent 1 <$> catMaybes ((Just <$> tblFldLines) <> pure primaryLine <> (Just <$> uniqueLines)))
   where
     indent n s = replicate n '\t' <> s
 
@@ -359,22 +357,23 @@ decTedious ::
   String ->
   Q [Dec]
 decTedious str = do
-  let tts = case parse pTedious "" str of
-        Left b -> fail (errorBundlePretty b)
-        Right (Tedious _ tts_) -> tts_
+  let tts = case parse pTediousTyps "" str of
+        Left b -> error ("parse pTedious : " <> errorBundlePretty b)
+        Right tts_ -> tts_
   let repTts = tts <&> repTediousTyp
   let reps = repTts >>= (\(m, devs) -> HM.toList m <&> (\(n, flds) -> (n, devs, flds)))
-  typDecs <- join <$> mapM repDec reps
-  tblDecs <- join <$> mapM decOpaleye tts
-  return (typDecs <> tblDecs)
+  tediousTypDecs <- join <$> mapM repDec reps
+  opaleyeDecs <- join <$> mapM decOpaleye tts
+  persistDecs <- decPersist tts
+  return (tediousTypDecs <> opaleyeDecs <> persistDecs)
   where
     repDec :: (TypName, [DevTypName], RepTediousFields) -> Q [Dec]
     repDec (typName, _devClsNames, flds) = do
       let name = mkName typName
       let vbs =
             flds
-              <&> ( \(_fldName, _, _fldTypS, _mFldBas, _mFldSamp, _mFldExt) ->
-                      varBangType (mkName $ "_" <> lowerFirst typName <> upperFirst _fldName) (bangType (bang noSourceUnpackedness noSourceStrictness) (pure $ strToTyp _fldTypS (_mFldBas || _mFldExt)))
+              <&> ( \(_fldName, _, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM) ->
+                      varBangType (mkName $ "_" <> lowerFirst typName <> upperFirst _fldName) (bangType (bang noSourceUnpackedness noSourceStrictness) (pure $ strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)))
                   )
       dec <-
         if length vbs == 1
@@ -395,8 +394,8 @@ decTedious str = do
         return $ InstanceD Nothing [] (AppT (ConT ''FromJSON) (ConT name)) [FunD 'A.parseJSON [Clause [] (NormalB e) []]]
       decToSchema' <- do
         let tuples =
-              ( \(_fldName, _mFldTitle, _fldTypS, _mFldBas, _mFldSamp, _mFldExt) -> do
-                  let _fldTyp = strToTyp _fldTypS (_mFldBas || _mFldExt)
+              ( \(_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM) -> do
+                  let _fldTyp = strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)
                   let sigProxy = SigE (ConE 'Proxy) (AppT (ConT ''Proxy) _fldTyp)
                   (_fldName, _mFldTitle, _fldTyp, isMaybeTyp _fldTyp, _mFldSamp, AppE (VarE 'declareSchemaRef) sigProxy)
               )
@@ -411,7 +410,7 @@ decTedious str = do
                     (varE 'IHM.fromList)
                     ( listE $
                         tuples
-                          <&> ( \(_fldName, _mFldTitle, _, _, _, _mFldBas) ->
+                          <&> ( \(_fldName, _mFldTitle, _, _, _, _fldBasIsM) ->
                                   tupE [stringE _fldName, uInfixE (varE (mkName $ fldSchemaName _fldName)) (varE '(<&>)) (uInfixE (varE 'title) (varE '(L..~)) [|_mFldTitle|])]
                               )
                     )
@@ -427,7 +426,15 @@ decTedious str = do
                       )
         let samp = appE (appE (varE 'uncurryN) (conE name)) sampTup
         let u4 = uInfixE (varE 'example) (varE '(L.?~)) (appE (varE 'toJSON) samp)
-        let pureStmt = noBindS (appE (varE 'return) (appE (appE (varE 'named) (stringE typName)) (uInfixE (uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3) (varE '(F.&)) u4)))
+        let pureStmt =
+              noBindS
+                ( appE
+                    (varE 'return)
+                    ( appE
+                        (appE (varE 'named) (stringE typName))
+                        (uInfixE (uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3) (varE '(F.&)) u4)
+                    )
+                )
         e <- doE $ bindStmts <> [pureStmt]
         return $ InstanceD Nothing [] (AppT (ConT ''ToSchema) (ConT name)) [FunD 'O.declareNamedSchema [Clause [WildP] (NormalB e) []]]
       decLens <- dropWhile isDataD <$> declareLensesWith lensRules (pure [dec])
@@ -440,7 +447,7 @@ decTedious str = do
     fldSchemaName = ("schema" <>) . upperFirst
 
 decOpaleye :: TediousTyp -> Q [Dec]
-decOpaleye (TediousTyp (Combo basTypName tblName _ _) flds) = evalContT $ do
+decOpaleye (TediousTyp (Combo basTypName tblName _) flds) = evalContT $ do
   callCC $ \exit -> do
     let funbasTypName = lowerFirst basTypName <> "Table"
     let tblFlds = repOpaleye flds
@@ -452,7 +459,23 @@ decOpaleye (TediousTyp (Combo basTypName tblName _ _) flds) = evalContT $ do
     sig <- lift $ sigD (mkName funbasTypName) (appT (appT (conT ''Table) wFlds) vFlds)
     let nFlds = sel1 <$> tblFlds
     let eFlds = appE (varE 'tableField) . litE . stringL <$> nFlds
-    fun <- lift $ funD (mkName funbasTypName) [clause [] (normalB (appE (appE (varE 'table) (litE (stringL (fromMaybe (lowerFirst basTypName) tblName)))) (appE (varE (mkName $ "p" <> (show . length $ nFlds))) (genFunFields eFlds)))) []]
+    fun <-
+      lift $
+        funD
+          (mkName funbasTypName)
+          [ clause
+              []
+              ( normalB
+                  ( appE
+                      ( appE
+                          (varE 'table)
+                          (litE (stringL (fromMaybe (lowerFirst basTypName) tblName)))
+                      )
+                      (appE (varE (mkName $ "p" <> (show . length $ nFlds))) (genFunFields eFlds))
+                  )
+              )
+              []
+          ]
     return [sig, fun]
   where
     genSigFields (t : ts) Nothing = genSigFields ts (Just $ if null ts then t else AppT (TupleT $ length ts + 1) t)
@@ -463,8 +486,17 @@ decOpaleye (TediousTyp (Combo basTypName tblName _ _) flds) = evalContT $ do
     genFunFields [e] = parensE e
     genFunFields _ = fail "makeTable : empty flds"
 
-decPersist :: String -> [Dec]
-decPersist s = []
+decPersist :: [TediousTyp] -> Q [Dec]
+decPersist tts = do
+  let unboundEntityDefs = unlines $ mapMaybe (strPersistTyp . repPersistTyp) tts
+  let name_ = mkName "tediousPersistString"
+  sigD_ <- sigD name_ (conT ''String)
+  valD_ <- valD (varP name_) (normalB (litE (stringL unboundEntityDefs))) []
+  pure [sigD_, valD_]
+
+-- decPersist :: Maybe MigrateName -> Maybe PersistSetting -> String -> Q [Dec]
+-- decPersist mMn (Just PersistUpperCase) s = share [mkPersist sqlSettings, mkMigrate (fromMaybe "migrateAll" mMn)] $(persistUpperCase s)
+-- decPersist mMn _ s = share [mkPersist sqlSettings, mkMigrate (fromMaybe "migrateAll" mMn)] $(persistUpperCase s)
 
 strToTyp :: String -> Bool -> Type
 strToTyp s m =
