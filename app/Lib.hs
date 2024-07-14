@@ -18,7 +18,7 @@ import Opaleye.SqlTypes (SqlInt8, SqlInt4)
 import Tedious (tedious)
 
 [tedious|
-  Dog table "my_dog" deriving Exception -- dog
+  Dog table dog deriving Exception -- dog
     id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)
     firstName `first name` Text `Wang` ("first_name", Field SqlText) !UniqueDog DogA DogC
     secondName `second name` Text `Ji Rong` ("second_name", Maybe (Field SqlText), Field SqlText) !UniqueDog DogA
@@ -31,7 +31,7 @@ import Tedious (tedious)
     friends `dog's friends` [Text] DogC
     createdAt `creation time` UTCTime ("cteated_at", Maybe (FieldNullable SqlTimestamptz), FieldNullable SqlTimestamptz) default=`CURRENT_TIMESTAMP` DogB DogC?
 
-  Cat
+  Cat table (public, cat)
     id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)
     name Text (Maybe (Field Text), Field Text) !UniqueCat CatA CatC
     master Text? (Maybe (FieldNullable Text), FieldNullable Text) CatA CatB?

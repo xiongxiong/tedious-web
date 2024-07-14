@@ -28,7 +28,7 @@ import GHC.Generics (Generic)
 import Language.Haskell.Meta (parseType)
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
-import Opaleye (table, tableField)
+import Opaleye (table, tableField, tableWithSchema)
 import Opaleye.Table (Table)
 import Tedious.Orphan ()
 import Tedious.Util (lowerFirst, toJSONOptions, trimPrefixName_, upperFirst)
@@ -52,6 +52,8 @@ type FldLabel = String -- openapi label
 type FldTypS = String
 
 type FldSamp = String -- openapi example
+
+type TblSchema = String
 
 type TblName = String
 
@@ -84,11 +86,14 @@ type RepPersistTyp = (BasTypName, TblPrimary, [TblUnique], [(FldName, FldTypS, F
 data Combo
   = Combo
       BasTypName -- base type name
-      (Maybe TblName) -- table name
+      (Maybe TblInfo) -- table name
       (Maybe [DevTypName]) -- derivings
   deriving stock (Eq, Show, Generic)
 
-data ComboAttr = ComboTblName TblName | ComboDevTyp [DevTypName]
+data TblInfo = TblInfoQualified TblSchema TblName | TblInfoUnQualified TblName
+  deriving stock (Eq, Show, Generic)
+
+data ComboAttr = ComboTblInfo TblInfo | ComboDevTyp [DevTypName]
   deriving stock (Eq, Show, Generic)
 
 data Field
@@ -155,8 +160,8 @@ parens = between (symbol "(") (symbol ")")
 parens' :: Parser String -> Parser String
 parens' p = join <$> sequence [pure "(", between (symbol "(") (symbol ")") p, pure ")"]
 
-pTuple :: Parser String
-pTuple =
+pTupleString :: Parser String
+pTupleString =
   join
     <$> sequence
       [ pure "(",
@@ -164,8 +169,8 @@ pTuple =
           (symbol "(")
           (symbol ")")
           ( (<>)
-              <$> ((unwords <$> M.some pNameUpper) <|> pTuple)
-              <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTuple)))))
+              <$> ((unwords <$> M.some pNameUpper) <|> pTupleString)
+              <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTupleString)))))
           ),
         pure ")"
       ]
@@ -185,19 +190,19 @@ backQuotes = between (symbol "`") (symbol "`")
 backQuoteString :: Parser String
 backQuoteString = lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
 
-pTblName :: Parser TblName
-pTblName = lexeme (MC.string "table") *> quotes pName
+pTblInfo :: Parser TblInfo
+pTblInfo = lexeme (MC.string "table") *> (parens (TblInfoQualified <$> pName <*> (symbol "," *> pName)) <|> (TblInfoUnQualified <$> pName))
 
 pDevTyp :: Parser [DevTypName]
 pDevTyp = lexeme (MC.string "deriving") *> lexeme (M.some pNameUpper)
 
 pComboAttr :: Parser ComboAttr
-pComboAttr = (ComboTblName <$> pTblName) <|> (ComboDevTyp <$> pDevTyp)
+pComboAttr = (ComboTblInfo <$> pTblInfo) <|> (ComboDevTyp <$> pDevTyp)
 
-pComboAttrs :: Parser (Maybe TblName, Maybe [DevTypName])
+pComboAttrs :: Parser (Maybe TblInfo, Maybe [DevTypName])
 pComboAttrs = do
   attrs <- M.many pComboAttr
-  let attrTblName = listToMaybe $ mapMaybe (\case (ComboTblName tblName) -> Just tblName; _ -> Nothing) attrs
+  let attrTblName = listToMaybe $ mapMaybe (\case (ComboTblInfo tblInfo) -> Just tblInfo; _ -> Nothing) attrs
   let attrDevTyp = listToMaybe $ mapMaybe (\case (ComboDevTyp devTyps) -> Just devTyps; _ -> Nothing) attrs
   pure (attrTblName, attrDevTyp)
 
@@ -218,7 +223,7 @@ pFldTyp =
   try (unwords <$> (((<>) . pure . unwords <$> M.some pNameUpper) <*> (pure . unwords <$> M.some pFldTyp)))
     <|> try (parens' pFldTyp)
     <|> try (brackets' pFldTyp)
-    <|> try pTuple
+    <|> try pTupleString
     <|> (unwords <$> M.some pNameUpper)
 
 pFldSamp :: Parser FldSamp
@@ -447,7 +452,7 @@ decTedious str = do
     fldSchemaName = ("schema" <>) . upperFirst
 
 decOpaleye :: TediousTyp -> Q [Dec]
-decOpaleye (TediousTyp (Combo basTypName tblName _) flds) = evalContT $ do
+decOpaleye (TediousTyp (Combo basTypName mTblInfo _) flds) = evalContT $ do
   callCC $ \exit -> do
     let funbasTypName = lowerFirst basTypName <> "Table"
     let tblFlds = repOpaleye flds
@@ -467,10 +472,7 @@ decOpaleye (TediousTyp (Combo basTypName tblName _) flds) = evalContT $ do
               []
               ( normalB
                   ( appE
-                      ( appE
-                          (varE 'table)
-                          (litE (stringL (fromMaybe (lowerFirst basTypName) tblName)))
-                      )
+                      (appTable basTypName mTblInfo)
                       (appE (varE (mkName $ "p" <> (show . length $ nFlds))) (genFunFields eFlds))
                   )
               )
@@ -485,6 +487,10 @@ decOpaleye (TediousTyp (Combo basTypName tblName _) flds) = evalContT $ do
     genFunFields es | length es > 1 = tupE es
     genFunFields [e] = parensE e
     genFunFields _ = fail "makeTable : empty flds"
+    appTable basTypName_ mTblInfo_ = case mTblInfo_ of
+      Nothing -> appE (varE 'table) (litE (stringL basTypName_))
+      Just (TblInfoQualified tblSchema_ tblName_) -> appE (appE (varE 'tableWithSchema) (litE (stringL tblSchema_))) (litE (stringL tblName_))
+      Just (TblInfoUnQualified tblName_) -> appE (varE 'table) (litE (stringL tblName_))
 
 decPersist :: [TediousTyp] -> Q [Dec]
 decPersist tts = do

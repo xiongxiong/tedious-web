@@ -14,7 +14,7 @@ import Data.Tuple.All (Sel1 (..))
 import Data.Typeable (Proxy (..), Typeable, typeRep)
 import Database.PostgreSQL.Simple (Connection)
 import Effectful (Eff, IOE, MonadIO (..), (:>))
-import Effectful.Error.Dynamic (Error, throwError)
+import Effectful.Error.Dynamic (throwError)
 import Effectful.Reader.Dynamic (Reader, asks)
 import Network.HTTP.Types qualified as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, sqlUTCTime, toNullable, where_, (.==))
