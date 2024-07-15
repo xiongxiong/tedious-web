@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           tedious-web
-version:        0.2.0.4
+version:        0.2.0.5
 description:    Please see the README on GitHub at <https://github.com/githubuser/tedious-web#readme>
 homepage:       https://github.com/githubuser/tedious-web#readme
 bug-reports:    https://github.com/githubuser/tedious-web/issues
@@ -62,8 +62,7 @@ library
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wno-orphans -Wpartial-fields -Wredundant-constraints
   build-depends:
-      HList
-    , aeson
+      aeson
     , base >=4.7 && <5
     , data-default
     , data-default-instances-containers
@@ -126,8 +125,7 @@ executable tedious-web-exe
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wno-orphans -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -ddump-splices -ddump-to-file
   build-depends:
-      HList
-    , aeson
+      aeson
     , base >=4.7 && <5
     , data-default
     , data-default-instances-containers
@@ -192,8 +190,7 @@ test-suite tedious-web-test
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wno-orphans -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      HList
-    , aeson
+      aeson
     , base >=4.7 && <5
     , data-default
     , data-default-instances-containers
