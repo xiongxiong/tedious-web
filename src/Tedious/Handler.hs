@@ -16,9 +16,9 @@ import Effectful (Eff, IOE, MonadIO (..), (:>))
 import Effectful.Error.Dynamic (throwError)
 import Effectful.Reader.Dynamic (Reader, asks)
 import Network.HTTP.Types qualified as HTTP
-import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, sqlUTCTime, toNullable, where_, (.==))
+import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, Select, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, sqlUTCTime, toNullable, where_, (.==))
 import Opaleye.Internal.Table (tableIdentifier)
-import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
+import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), SysOperTargetName, catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
@@ -142,8 +142,61 @@ list envPool tbl flt ord r2d =
               -<
                 pageI
           respondA HTTP.ok200 JSON -< res
-      oper = SysOper' "list" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+      sysOper = SysOper' "list" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)
+
+list' ::
+  forall i d f ids rfs r eff env es h ts. -- (record id) data (data filter) [id] (table read fields) (table record) eff effects (app env) arrow traits
+  ( ids ~ [i],
+    Integral i,
+    DefaultFromField SqlInt8 i,
+    Default FromFields rfs r,
+    Reader env :> es,
+    IOE :> es,
+    eff ~ Eff es,
+    StdHandler h eff,
+    Gets h '[Body JSON (PageI f)],
+    Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (PageO [d])), Body JSON (Rep ())]
+  ) =>
+  SysOperTargetName ->
+  (env -> Pool Connection) ->
+  Select rfs ->
+  (Maybe f -> rfs -> Field SqlBool) ->
+  Order rfs ->
+  (r -> d) ->
+  (RequestHandler h ts, SysOper')
+list' tName envPool sel flt ord r2d =
+  let handler = requestBody @(PageI f) JSON errorHandler $
+        proc request -> do
+          let pageI = pick @(Body JSON (PageI f)) $ from request
+          res <-
+            arrM
+              ( \pageI -> catchRep $ do
+                  let mPage = _pageIPage pageI
+                  pool <- asks envPool
+                  (rs, cs) <- liftIO . withResource pool $
+                    \conn -> do
+                      let sel_ = do
+                            r <- sel
+                            where_ $ flt (_pageIFilter pageI) r
+                            pure r
+                      let sel' = case mPage of
+                            Nothing -> sel_
+                            Just page -> limit (fromIntegral $ page ^. pageSize) . offset (fromIntegral $ (page ^. pageIndex - 1) * (page ^. pageSize)) . orderBy ord $ sel_
+                      rs <- runSelect conn sel'
+                      cs <- runSelect conn . countRows $ sel
+                      return (rs, fromIntegral <$> (cs :: ids))
+                  let count = fromMaybe 0 (listToMaybe cs)
+                  let pageO = case mPage of
+                        Nothing -> PageO (Page 1 count) count
+                        Just page -> fillPage page count
+                  return . rep . pageO $ r2d <$> rs
+              )
+              -<
+                pageI
+          respondA HTTP.ok200 JSON -< res
+      sysOper = SysOper' "list" tName Nothing
+   in (handler, sysOper)
 
 get ::
   forall i fi d wfs rfs r eff env es h ts. -- (record id) (field id) data (table write fields) (table read fields) (table record) eff effects (app env) arrow traits
@@ -179,8 +232,45 @@ get envPool tbl idf r2d =
             -<
               tid
         respondA HTTP.ok200 JSON -< rep md
-      oper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+      sysOper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)
+
+get' ::
+  forall i fi d rfs r eff env es h ts. -- (record id) (field id) data (table read fields) (table record) eff effects (app env) arrow traits
+  ( Default FromFields rfs r,
+    Sel1 rfs (Field fi),
+    Reader env :> es,
+    IOE :> es,
+    eff ~ Eff es,
+    StdHandler h eff,
+    HaveTraits '[PathVar "id" i] ts,
+    Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (Maybe d))]
+  ) =>
+  SysOperTargetName ->
+  (env -> Pool Connection) ->
+  Select rfs ->
+  (i -> Field fi) ->
+  (r -> d) ->
+  (RequestHandler h ts, SysOper')
+get' tName envPool sel idf r2d =
+  let handler = proc request -> do
+        let tid = pick @(PathVar "id" i) $ from request
+        (md :: Maybe d) <-
+          arrM
+            ( \tid -> do
+                pool <- asks envPool
+                rs <- liftIO . withResource pool $
+                  \conn -> runSelect conn $ do
+                    r <- sel
+                    where_ $ sel1 r .== idf tid
+                    pure r
+                pure . listToMaybe $ r2d <$> rs
+            )
+            -<
+              tid
+        respondA HTTP.ok200 JSON -< rep md
+      sysOper = SysOper' "get" tName Nothing
+   in (handler, sysOper)
 
 add ::
   forall i fi a wfs rfs eff env es h ts. -- (record id) (field id) (data to add) (table write fields) (table read fields) eff effects (app env) arrow traits
@@ -201,7 +291,7 @@ add envPool tbl a2t =
   let handler = requestBody @a JSON errorHandler $
         proc request -> do
           let toAdd = pick @(Body JSON a) $ from request
-          tid <-
+          rep_ <-
             arrM
               ( \toAdd -> catchRep $ do
                   pool <- asks envPool
@@ -218,9 +308,38 @@ add envPool tbl a2t =
               )
               -<
                 toAdd
-          respondA HTTP.ok200 JSON -< (tid :: Rep i)
-      oper = SysOper' "add" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+          respondA HTTP.ok200 JSON -< (rep_ :: Rep i)
+      sysOper = SysOper' "add" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)
+
+add' ::
+  forall i a eff env es h ts. -- (record id) (data to add) eff effects (app env) arrow traits
+  ( Reader env :> es,
+    IOE :> es,
+    eff ~ Eff es,
+    StdHandler h eff,
+    Gets h '[Body JSON a],
+    Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
+  ) =>
+  SysOperTargetName ->
+  (env -> Pool Connection) ->
+  (Connection -> a -> IO i) ->
+  (RequestHandler h ts, SysOper')
+add' tName envPool oper =
+  let handler = requestBody @a JSON errorHandler $
+        proc request -> do
+          let toAdd = pick @(Body JSON a) $ from request
+          rep_ <-
+            arrM
+              ( \toAdd -> catchRep $ do
+                  pool <- asks envPool
+                  liftIO . withResource pool $ \conn -> rep <$> oper conn toAdd
+              )
+              -<
+                toAdd
+          respondA HTTP.ok200 JSON -< rep_
+      sysOper = SysOper' "add" tName Nothing
+   in (handler, sysOper)
 
 dup ::
   forall i fi wfs rfs r eff env es h ts. -- (record id) (field id) (table write fields) (table read fields) (table record) eff effects (app env) arrow traits
@@ -266,8 +385,37 @@ dup envPool tbl idf r2t =
             -<
               tid
         respondA HTTP.ok200 JSON -< (tid_ :: Rep i)
-      oper = SysOper' "dup" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+      sysOper = SysOper' "dup" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)
+
+dup' ::
+  forall i eff env es h ts. -- (record id) eff effects (app env) arrow traits
+  ( Reader env :> es,
+    IOE :> es,
+    eff ~ Eff es,
+    StdHandler h eff,
+    HaveTraits '[PathVar "id" i] ts,
+    Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
+  ) =>
+  SysOperTargetName ->
+  (env -> Pool Connection) ->
+  (Connection -> i -> IO i) ->
+  (RequestHandler h ts, SysOper')
+dup' tName envPool oper =
+  let handler = proc request -> do
+        let tid = pick @(PathVar "id" i) $ from request
+        rep_ <-
+          arrM
+            ( \(tid, oper_) -> catchRep $ do
+                pool <- asks envPool
+                liftIO . withResource pool $
+                  \conn -> rep <$> oper_ conn tid
+            )
+            -<
+              (tid, oper)
+        respondA HTTP.ok200 JSON -< rep_
+      sysOper = SysOper' "dup" tName Nothing
+   in (handler, sysOper)
 
 upd ::
   forall i fi u wfs rfs d r eff env es h ts. -- (record id) (field id) update (table write fields) (table read fields) data (table record) eff effects (app env) arrow traits
@@ -310,8 +458,39 @@ upd envPool tbl idf u2t r2d =
               -<
                 (tid, toUpd)
           respondA HTTP.ok200 JSON -< (ru :: Rep d)
-      oper = SysOper' "upd" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+      sysOper = SysOper' "upd" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)
+
+upd' ::
+  forall i u d eff env es h ts. -- (record id) update data eff effects (app env) arrow traits
+  ( Reader env :> es,
+    IOE :> es,
+    eff ~ Eff es,
+    StdHandler h eff,
+    HaveTraits '[PathVar "id" i] ts,
+    Gets h '[Body JSON u],
+    Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep d), Body JSON (Rep ())]
+  ) =>
+  SysOperTargetName ->
+  (env -> Pool Connection) ->
+  (Connection -> i -> u -> IO d) ->
+  (RequestHandler h ts, SysOper')
+upd' tName envPool oper =
+  let handler = requestBody @u JSON errorHandler $
+        proc request -> do
+          let tid = pick @(PathVar "id" i) $ from request
+          let toUpd = pick @(Body JSON u) $ from request
+          ru <-
+            arrM
+              ( \(tid, toUpd) -> catchRep $ do
+                  pool <- asks envPool
+                  liftIO . withResource pool $ \conn -> rep <$> oper conn tid toUpd
+              )
+              -<
+                (tid, toUpd)
+          respondA HTTP.ok200 JSON -< (ru :: Rep d)
+      sysOper = SysOper' "upd" tName Nothing
+   in (handler, sysOper)
 
 del ::
   forall i fi wfs rfs eff env es h ts. -- (record id) (field id) (table write fields) (table read fields) eff effects (app env) arrow traits
@@ -347,5 +526,5 @@ del envPool tbl idf =
             -<
               tid
         respondA HTTP.ok200 JSON -< (r :: Rep Text)
-      oper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
-   in (handler, oper)
+      sysOper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
+   in (handler, sysOper)

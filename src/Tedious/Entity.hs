@@ -152,3 +152,7 @@ repErrNotSupport = repErr 500 "not supported yet"
 
 catchRep :: Eff (Error Err : es) (Rep a) -> Eff es (Rep a)
 catchRep = runErrorWith (const $ return . repErr')
+
+--
+
+type SysOperTargetName = Text
