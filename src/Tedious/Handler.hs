@@ -11,13 +11,13 @@ import Data.Profunctor.Product.Default (Default)
 import Data.Text (Text, pack)
 import Data.Time (getCurrentTime)
 import Data.Tuple.All (Sel1 (..))
-import Data.Typeable (Proxy (..), Typeable, typeRep)
 import Database.PostgreSQL.Simple (Connection)
 import Effectful (Eff, IOE, MonadIO (..), (:>))
 import Effectful.Error.Dynamic (throwError)
 import Effectful.Reader.Dynamic (Reader, asks)
 import Network.HTTP.Types qualified as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, sqlUTCTime, toNullable, where_, (.==))
+import Opaleye.Internal.Table (tableIdentifier)
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
 
@@ -93,13 +93,12 @@ audit envPool user (handler, oper) =
     returnA -< res
 
 list ::
-  forall i d f ids t fs r eff env es h ts. -- (record id) data (data filter) [id] table (table fields) (table record) eff effects (app env) arrow traits
-  ( Typeable t,
-    ids ~ [i],
+  forall i d f ids wfs rfs r eff env es h ts. -- (record id) data (data filter) [id] (table write fields) (table read fields) (table record) eff effects (app env) arrow traits
+  ( ids ~ [i],
     Integral i,
     DefaultFromField SqlInt8 i,
-    Default Unpackspec fs fs,
-    Default FromFields fs r,
+    Default Unpackspec rfs rfs,
+    Default FromFields rfs r,
     Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
@@ -108,9 +107,9 @@ list ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (PageO [d])), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
-  (Maybe f -> fs -> Field SqlBool) ->
-  Order fs ->
+  Table wfs rfs ->
+  (Maybe f -> rfs -> Field SqlBool) ->
+  Order rfs ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
 list envPool tbl flt ord r2d =
@@ -143,15 +142,14 @@ list envPool tbl flt ord r2d =
               -<
                 pageI
           respondA HTTP.ok200 JSON -< res
-      oper = SysOper' "list" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "list" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
 
 get ::
-  forall i fi d t fs r eff env es h ts. -- (record id) (field id) data table (table fields) (table record) eff effects (app env) arrow traits
-  ( Typeable t,
-    Default Unpackspec fs fs,
-    Default FromFields fs r,
-    Sel1 fs (Field fi),
+  forall i fi d wfs rfs r eff env es h ts. -- (record id) (field id) data (table write fields) (table read fields) (table record) eff effects (app env) arrow traits
+  ( Default Unpackspec rfs rfs,
+    Default FromFields rfs r,
+    Sel1 rfs (Field fi),
     Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
@@ -160,7 +158,7 @@ get ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep (Maybe d))]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
+  Table wfs rfs ->
   (i -> Field fi) ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
@@ -181,13 +179,12 @@ get envPool tbl idf r2d =
             -<
               tid
         respondA HTTP.ok200 JSON -< rep md
-      oper = SysOper' "get" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
 
 add ::
-  forall i fi a t fs eff env es h ts. -- (record id) (field id) (data to add) table (table fields) eff effects (app env) arrow traits
-  ( Typeable t,
-    Sel1 fs (Field fi),
+  forall i fi a wfs rfs eff env es h ts. -- (record id) (field id) (data to add) (table write fields) (table read fields) eff effects (app env) arrow traits
+  ( Sel1 rfs (Field fi),
     DefaultFromField fi i,
     Reader env :> es,
     IOE :> es,
@@ -197,8 +194,8 @@ add ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
-  (a -> [t]) ->
+  Table wfs rfs ->
+  (a -> [wfs]) ->
   (RequestHandler h ts, SysOper')
 add envPool tbl a2t =
   let handler = requestBody @a JSON errorHandler $
@@ -222,15 +219,14 @@ add envPool tbl a2t =
               -<
                 toAdd
           respondA HTTP.ok200 JSON -< (tid :: Rep i)
-      oper = SysOper' "add" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "add" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
 
 dup ::
-  forall i fi t fs r eff env es h ts. -- (record id) (field id) table (table fields) (table record) eff effects (app env) arrow traits
-  ( Typeable t,
-    Default Unpackspec fs fs,
-    Default FromFields fs r,
-    Sel1 fs (Field fi),
+  forall i fi wfs rfs r eff env es h ts. -- (record id) (field id) (table write fields) (table read fields) (table record) eff effects (app env) arrow traits
+  ( Default Unpackspec rfs rfs,
+    Default FromFields rfs r,
+    Sel1 rfs (Field fi),
     DefaultFromField fi i,
     Reader env :> es,
     IOE :> es,
@@ -240,9 +236,9 @@ dup ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
+  Table wfs rfs ->
   (i -> Field fi) ->
-  (r -> t) ->
+  (r -> wfs) ->
   (RequestHandler h ts, SysOper')
 dup envPool tbl idf r2t =
   let handler = proc request -> do
@@ -270,14 +266,13 @@ dup envPool tbl idf r2t =
             -<
               tid
         respondA HTTP.ok200 JSON -< (tid_ :: Rep i)
-      oper = SysOper' "dup" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "dup" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
 
 upd ::
-  forall i fi u t fs d r eff env es h ts. -- (record id) (field id) update table (table fields) data (table record) eff effects (app env) arrow traits
-  ( Typeable t,
-    Sel1 fs (Field fi),
-    Default FromFields fs r,
+  forall i fi u wfs rfs d r eff env es h ts. -- (record id) (field id) update (table write fields) (table read fields) data (table record) eff effects (app env) arrow traits
+  ( Sel1 rfs (Field fi),
+    Default FromFields rfs r,
     Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
@@ -287,9 +282,9 @@ upd ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep d), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
+  Table wfs rfs ->
   (i -> Field fi) ->
-  (u -> (fs -> t)) ->
+  (u -> (rfs -> wfs)) ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
 upd envPool tbl idf u2t r2d =
@@ -315,13 +310,12 @@ upd envPool tbl idf u2t r2d =
               -<
                 (tid, toUpd)
           respondA HTTP.ok200 JSON -< (ru :: Rep d)
-      oper = SysOper' "upd" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "upd" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
 
 del ::
-  forall i fi t fs eff env es h ts. -- (record id) (field id) table (table fields) data (table fields) eff effects (app env) arrow traits
-  ( Typeable t,
-    Sel1 fs (Field fi),
+  forall i fi wfs rfs eff env es h ts. -- (record id) (field id) (table write fields) (table read fields) eff effects (app env) arrow traits
+  ( Sel1 rfs (Field fi),
     Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
@@ -330,7 +324,7 @@ del ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep Text), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  Table t fs ->
+  Table wfs rfs ->
   (i -> Field fi) ->
   (RequestHandler h ts, SysOper')
 del envPool tbl idf =
@@ -353,5 +347,5 @@ del envPool tbl idf =
             -<
               tid
         respondA HTTP.ok200 JSON -< (r :: Rep Text)
-      oper = SysOper' "get" (pack . show . typeRep $ (Proxy :: Proxy t)) Nothing
+      oper = SysOper' "get" (pack . show . tableIdentifier $ tbl) Nothing
    in (handler, oper)
