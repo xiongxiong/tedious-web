@@ -22,9 +22,9 @@ import Data.OpenApi (HasExample (..), HasProperties (..), HasRequired (..), HasT
 import Data.OpenApi qualified as O
 import Data.OpenApi.Internal.Schema (named)
 import Data.Proxy (Proxy (..))
-import Data.Tuple.All (Curry (..), Sel1 (sel1), Sel3 (sel3), Sel4 (sel4))
+import Data.Tuple.All (Curry (..), Sel1 (sel1), Sel3 (sel3), Sel4 (sel4), Sel7 (..))
 import Data.Void (Void)
-import GHC.Generics (Generic)
+import GHC.Generics (Generic (..), Rep)
 import Language.Haskell.Meta (parseType)
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
@@ -67,6 +67,8 @@ type FldBasIsMaybe = Bool
 
 type FldExtIsMaybe = Bool
 
+type FldExtVar = String
+
 type TblFldIsPrimary = Bool
 
 type TblFldUnique = String
@@ -75,7 +77,9 @@ type TblFldDefault = String
 
 type TblUniqueName = String
 
-type RepTediousFields = [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe)]
+type TypInfo = (TypName, [DevTypName], RepTediousFields)
+
+type RepTediousFields = [(FldName, Maybe FldLabel, FldTypS, FldBasIsMaybe, Maybe FldSamp, FldExtIsMaybe, Maybe FldExtVar)]
 
 type RepOpaleye = [(TblFldOName, (FldTypS, FldBasIsMaybe), TblFldOTypSW, TblFldOTypSR)]
 
@@ -101,10 +105,13 @@ data Field
       (FldName, Maybe FldLabel) -- (field name, field label used in openapi schema)
       (FldTypS, FldBasIsMaybe, Maybe FldSamp) -- (type of field on base type, field is maybe or not, example value in openapi schema)
       (Maybe TblFld) -- table field
-      [(ExtTypName, FldExtIsMaybe)] -- (name of ext type which has this field, the field of the ext type is maybe or not)
+      [ExtTyp] -- (name of ext type which has this field, the field of the ext type is maybe or not)
   deriving stock (Eq, Show, Generic)
 
 data TblFld = TblFld TblFldOpaleye TblFldIsPrimary [TblFldUnique] (Maybe TblFldDefault)
+  deriving stock (Eq, Show, Generic)
+
+data ExtTyp = ExtTypNormal ExtTypName FldExtIsMaybe | ExtTypPoly ExtTypName FldExtVar
   deriving stock (Eq, Show, Generic)
 
 data TblFldOpaleye
@@ -286,8 +293,8 @@ pTblFld =
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
     pFldP p = try (TblFld <$> p <*> pOccur "#" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
 
-pExtName :: Parser (ExtTypName, FldExtIsMaybe)
-pExtName = lexeme ((,) <$> pNameUpper <*> (True <$ MC.char '?' <|> pure False))
+pExtName :: Parser ExtTyp
+pExtName = try (ExtTypPoly <$> pNameUpper_ <*> (MC.char ':' *> pNameLower)) <|> (ExtTypNormal <$> pNameUpper_ <*> pOccur "?")
 
 pField :: Parser Field
 pField = Field <$> pFldNameAndTitle <*> pFldTypTup <*> optional pTblFld <*> M.many pExtName
@@ -313,12 +320,16 @@ repTediousTyp (TediousTyp (Combo basTypName _ devs) flds) =
   let hm = defBase basTypName (flds <&> (\(Field tupleNameTitle tup _ _) -> (tupleNameTitle, tup))) HM.empty
    in (defExts flds hm, devIns <> filter (`notElem` (devIns <> noDevIns)) (fromMaybe empty devs))
   where
-    defBase _basTypName tuples = HM.insert _basTypName (tuples <&> (\((_fldName, _mFldTitle), (_fldTypS, _maybeFldBas, _mFldSamp)) -> (_fldName, _mFldTitle, _fldTypS, _maybeFldBas, _mFldSamp, False)))
+    defBase _basTypName tuples = HM.insert _basTypName (tuples <&> (\((_fldName, _mFldTitle), (_fldTypS, _maybeFldBas, _mFldSamp)) -> (_fldName, _mFldTitle, _fldTypS, _maybeFldBas, _mFldSamp, False, Nothing)))
     defExts [] m = m
     defExts (Field _ _ _ [] : ds) m = defExts ds m
-    defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld ((_extTypName, _fldExtIsM) : exTups) : _flds) m =
-      let m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM)) m
-       in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld exTups : _flds) m'
+    defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld (extTyp : extTyps) : _flds) m =
+      let (_extTypName, _fldExtIsM, _mFldExtVar) = procExtTyp extTyp
+          m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM, _mFldExtVar)) m
+       in defExts (Field (_fldName, _mFldTitle) (_fldTypS, _fldBasIsM, _mFldSamp) _mTblFld extTyps : _flds) m'
+    procExtTyp extTyp = case extTyp of
+      ExtTypNormal _extTypName _fldExtIsM -> (_extTypName, _fldExtIsM, Nothing)
+      ExtTypPoly _extTypName _fldExtVar -> (_extTypName, False, Just _fldExtVar)
 
 repOpaleye :: [Field] -> RepOpaleye
 repOpaleye = mapMaybe go
@@ -402,84 +413,127 @@ decTedious str = do
   persistDecs <- decPersist tts
   return (tediousTypDecs <> opaleyeDecs <> persistDecs)
   where
-    repDec :: (TypName, [DevTypName], RepTediousFields) -> Q [Dec]
-    repDec (typName, _devClsNames, flds) = do
-      let name = mkName typName
-      let vbs =
-            flds
-              <&> ( \(_fldName, _, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM) ->
-                      varBangType (mkName $ "_" <> lowerFirst typName <> upperFirst _fldName) (bangType (bang noSourceUnpackedness noSourceStrictness) (pure $ strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)))
-                  )
-      dec <-
+    repDec :: TypInfo -> Q [Dec]
+    repDec typInfo = do
+      _decBasic <- decBasic typInfo
+      _decStandaloneDerivs <- decStandaloneDerivs typInfo
+      _decToSchema <- decToSchema typInfo
+      _decJSON <- decJSON typInfo
+      decLens <- dropWhile isDataD <$> declareLensesWith lensRules (pure _decBasic)
+      pure $ _decBasic <> _decStandaloneDerivs <> _decJSON <> _decToSchema <> decLens
+
+decBasic :: TypInfo -> Q [Dec]
+decBasic (typName, _, flds) = do
+  let name = mkName typName
+  let vbs =
+        flds
+          <&> ( \(_fldName, _, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM, _mFldExtVar) ->
+                  let _fldTyp = case _mFldExtVar of
+                        Nothing -> pure $ strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)
+                        Just _fldExtVar -> varT (mkName _fldExtVar)
+                   in varBangType (mkName $ "_" <> lowerFirst typName <> upperFirst _fldName) (bangType (bang noSourceUnpackedness noSourceStrictness) _fldTyp)
+              )
+  let bndrs = [plainTV (mkName _fldExtVar) | _fldExtVar <- mapMaybe sel7 flds]
+  let dec =
         if length vbs == 1
           then
-            newtypeD mempty name [] Nothing (recC name vbs) [derivClause Nothing $ _devClsNames <&> conT . mkName]
+            newtypeD mempty name bndrs Nothing (recC name vbs) []
           else
-            dataD mempty name [] Nothing [recC name vbs] [derivClause Nothing $ _devClsNames <&> conT . mkName]
-      decDefault <- do
-        return $ StandaloneDerivD (Just AnyclassStrategy) [] (AppT (ConT ''Default) (ConT name))
-      decToJSON <- do
-        eToJ <- [|genericToJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
-        let fToJ = FunD 'A.toJSON [Clause [] (NormalB eToJ) []]
-        eToE <- [|genericToEncoding toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
-        let fToE = FunD 'A.toEncoding [Clause [] (NormalB eToE) []]
-        return $ InstanceD Nothing [] (AppT (ConT ''ToJSON) (ConT name)) [fToJ, fToE]
-      decFromJSON <- do
-        e <- [|genericParseJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
-        return $ InstanceD Nothing [] (AppT (ConT ''FromJSON) (ConT name)) [FunD 'A.parseJSON [Clause [] (NormalB e) []]]
-      decToSchema' <- do
-        let tuples =
-              ( \(_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM) -> do
-                  let _fldTyp = strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)
-                  let sigProxy = SigE (ConE 'Proxy) (AppT (ConT ''Proxy) _fldTyp)
-                  (_fldName, _mFldTitle, _fldTyp, isMaybeTyp _fldTyp, _mFldSamp, AppE (VarE 'declareSchemaRef) sigProxy)
+            dataD mempty name bndrs Nothing [recC name vbs] []
+  pure <$> dec
+
+decStandaloneDerivs :: TypInfo -> Q [Dec]
+decStandaloneDerivs (typName, _devClsNames, flds) =
+  return $
+    _devClsNames
+      <&> ( \_devClsName ->
+              let _fldExtVars = mapMaybe sel7 flds
+                  preds = [AppT (ConT (mkName _devClsName)) (VarT (mkName _fldExtVar)) | _fldExtVar <- _fldExtVars]
+               in StandaloneDerivD Nothing preds (AppT (ConT (mkName _devClsName)) (typWithVars typName _fldExtVars))
+          )
+
+decJSON :: TypInfo -> Q [Dec]
+decJSON (typName, _devClsNames, flds) = do
+  let _fldExtVars = mapMaybe sel7 flds
+  decToJSON <- do
+    eToJ <- [|genericToJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
+    let fToJ = FunD 'A.toJSON [Clause [] (NormalB eToJ) []]
+    eToE <- [|genericToEncoding toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
+    let fToE = FunD 'A.toEncoding [Clause [] (NormalB eToE) []]
+    let preds =
+          [ [ AppT (ConT ''Generic) (VarT (mkName _fldExtVar)),
+              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Value)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
+              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Encoding)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
+              AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar))
+            ]
+            | _fldExtVar <- _fldExtVars
+          ]
+    return $ InstanceD Nothing (join preds) (AppT (ConT ''ToJSON) (typWithVars typName _fldExtVars)) [fToJ, fToE]
+  decFromJSON <- do
+    e <- [|genericParseJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
+    let preds =
+          [ [ AppT (ConT ''Generic) (VarT (mkName _fldExtVar)),
+              AppT (AppT (ConT ''A.GFromJSON) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
+              AppT (ConT ''FromJSON) (VarT (mkName _fldExtVar))
+            ]
+            | _fldExtVar <- _fldExtVars
+          ]
+    return $ InstanceD Nothing (join preds) (AppT (ConT ''FromJSON) (typWithVars typName _fldExtVars)) [FunD 'A.parseJSON [Clause [] (NormalB e) []]]
+  pure [decToJSON, decFromJSON]
+
+decToSchema :: TypInfo -> Q [Dec]
+decToSchema (typName, _devClsNames, flds) = do
+  let name = mkName typName
+  let _fldExtVars = mapMaybe sel7 flds
+  let preds = [AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar)) | _fldExtVar <- _fldExtVars]
+  let tuples =
+        ( \(_fldName, _mFldTitle, _fldTypS, _fldBasIsM, _mFldSamp, _fldExtIsM, _mFldExtVar) -> do
+            let _fldTyp = case _mFldExtVar of
+                  Nothing -> strToTyp _fldTypS (_fldBasIsM || _fldExtIsM)
+                  Just _fldExtVar -> VarT (mkName _fldExtVar)
+            let sigProxy = SigE (ConE 'Proxy) (AppT (ConT ''Proxy) _fldTyp)
+            (_fldName, _mFldTitle, _fldTyp, isMaybeTyp _fldTyp, _mFldSamp, AppE (VarE 'declareSchemaRef) sigProxy)
+        )
+          <$> flds
+  let bindStmts = tuples <&> (\(_fldName, _, _, _, _, _schemaRefExp) -> bindS (varP (mkName $ fldSchemaName _fldName)) (pure _schemaRefExp))
+  let u1 = uInfixE (varE 'type_) (varE '(L.?~)) (conE 'OpenApiObject)
+  let u2 =
+        uInfixE
+          (varE 'properties)
+          (varE '(L..~))
+          ( appE
+              (varE 'IHM.fromList)
+              ( listE $
+                  tuples
+                    <&> ( \(_fldName, _mFldTitle, _, _, _, _fldBasIsM) ->
+                            tupE [stringE _fldName, uInfixE (varE (mkName $ fldSchemaName _fldName)) (varE '(<&>)) (uInfixE (varE 'title) (varE '(L..~)) [|_mFldTitle|])]
+                        )
               )
-                <$> flds
-        let bindStmts = tuples <&> (\(_fldName, _, _, _, _, _schemaRefExp) -> bindS (varP (mkName $ fldSchemaName _fldName)) (pure _schemaRefExp))
-        let u1 = uInfixE (varE 'type_) (varE '(L.?~)) (conE 'OpenApiObject)
-        let u2 =
-              uInfixE
-                (varE 'properties)
-                (varE '(L..~))
-                ( appE
-                    (varE 'IHM.fromList)
-                    ( listE $
-                        tuples
-                          <&> ( \(_fldName, _mFldTitle, _, _, _, _fldBasIsM) ->
-                                  tupE [stringE _fldName, uInfixE (varE (mkName $ fldSchemaName _fldName)) (varE '(<&>)) (uInfixE (varE 'title) (varE '(L..~)) [|_mFldTitle|])]
-                              )
-                    )
+          )
+  let u3 = uInfixE (varE 'required) (varE '(L..~)) (listE $ stringE . sel1 <$> filter (not . sel4) tuples)
+  let sampTup =
+        tupE $
+          tuples
+            <&> ( \(_, _, _fldTyp, _isMaybeFldTyp, _mFldSamp, _) ->
+                    case _mFldSamp of
+                      Nothing -> sigE (varE 'def) (pure _fldTyp)
+                      Just _fldSamp -> sigE (appE (varE 'read) (stringE _fldSamp)) (pure _fldTyp)
                 )
-        let u3 = uInfixE (varE 'required) (varE '(L..~)) (listE $ stringE . sel1 <$> filter (not . sel4) tuples)
-        let sampTup =
-              tupE $
-                tuples
-                  <&> ( \(_, _, _fldTyp, _isMaybeFldTyp, _mFldSamp, _) ->
-                          case _mFldSamp of
-                            Nothing -> sigE (varE 'def) (pure _fldTyp)
-                            Just _fldSamp -> sigE (appE (varE 'read) (stringE _fldSamp)) (pure _fldTyp)
-                      )
-        let samp = appE (appE (varE 'uncurryN) (conE name)) sampTup
-        let u4 = uInfixE (varE 'example) (varE '(L.?~)) (appE (varE 'toJSON) samp)
-        let pureStmt =
-              noBindS
-                ( appE
-                    (varE 'return)
-                    ( appE
-                        (appE (varE 'named) (stringE typName))
-                        (uInfixE (uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3) (varE '(F.&)) u4)
-                    )
-                )
-        e <- doE $ bindStmts <> [pureStmt]
-        return $ InstanceD Nothing [] (AppT (ConT ''ToSchema) (ConT name)) [FunD 'O.declareNamedSchema [Clause [WildP] (NormalB e) []]]
-      decLens <- dropWhile isDataD <$> declareLensesWith lensRules (pure [dec])
-      pure $ [dec, decDefault, decToJSON, decFromJSON, decToSchema'] <> decLens
-    isDataD :: Dec -> Bool
-    isDataD DataD {} = True
-    isDataD NewtypeD {} = True
-    isDataD _ = False
-    fldSchemaName :: FldName -> String
-    fldSchemaName = ("schema" <>) . upperFirst
+  let samp = appE (appE (varE 'uncurryN) (conE name)) sampTup
+  let u4 = uInfixE (varE 'example) (varE '(L.?~)) (appE (varE 'toJSON) samp)
+  let u = if null _fldExtVars
+            then uInfixE (uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3) (varE '(F.&)) u4
+            else uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3
+  let pureStmt =
+        noBindS
+          ( appE
+              (varE 'return)
+              ( appE
+                  (appE (varE 'named) (stringE typName))
+                  u
+              )
+          )
+  pure <$> instanceD (pure preds) (appT (conT ''ToSchema) (pure (typWithVars typName _fldExtVars))) [funD 'O.declareNamedSchema [clause [wildP] (normalB (doE $ bindStmts <> [pureStmt])) []]]
 
 decOpaleye :: TediousTyp -> Q [Dec]
 decOpaleye (TediousTyp (Combo basTypName mTblInfo _) flds) = evalContT $ do
@@ -539,11 +593,25 @@ strToTyp s m =
   let ot = either (error "decTedious: cannot parse field type") id (parseType s)
    in if m then AppT (ConT ''Maybe) ot else ot
 
+typWithVars :: TypName -> [FldExtVar] -> Type
+typWithVars name = go (ConT (mkName name))
+  where
+    go t [] = t
+    go t (var:vars) = go (AppT t (VarT (mkName var))) vars
+
 isMaybeTyp :: Type -> Bool
 isMaybeTyp (AppT (ConT c) _)
   | c == ''Maybe = True
   | otherwise = False
 isMaybeTyp _ = False
+
+isDataD :: Dec -> Bool
+isDataD DataD {} = True
+isDataD NewtypeD {} = True
+isDataD _ = False
+
+fldSchemaName :: FldName -> String
+fldSchemaName = ("schema" <>) . upperFirst
 
 --
 
