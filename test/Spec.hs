@@ -35,47 +35,49 @@ tests = describe "Tedious.Parser" $ do
       `shouldBe` Right "((Text, Text), (Text, Text))"
     parse pTupleString "" "((Text, (Text, Text)), (Text, Text))"
       `shouldBe` Right "((Text, (Text, Text)), (Text, Text))"
-  it "pFldTyp should work" $ do
-    parse pFldTyp "" "Text"
+  it "pFldTypS should work" $ do
+    parse pFldTypS "" "Text"
       `shouldBe` Right "Text"
-    parse pFldTyp "" "(Text)"
+    parse pFldTypS "" "(Text)"
       `shouldBe` Right "(Text)"
-    parse pFldTyp "" "(Text, Int)"
+    parse pFldTypS "" "(Text, Int)"
       `shouldBe` Right "(Text, Int)"
-    parse pFldTyp "" "(Text, (Text, Int))"
+    parse pFldTypS "" "(Text, (Text, Int))"
       `shouldBe` Right "(Text, (Text, Int))"
-    parse pFldTyp "" "[Text]"
+    parse pFldTypS "" "[Text]"
       `shouldBe` Right "[Text]"
-    parse pFldTyp "" "Maybe Text"
+    parse pFldTypS "" "Maybe Text"
       `shouldBe` Right "Maybe Text"
-    parse pFldTyp "" "Maybe [Text]"
+    parse pFldTypS "" "Maybe [Text]"
       `shouldBe` Right "Maybe [Text]"
-    parse pFldTyp "" "Maybe (Maybe [Int])"
+    parse pFldTypS "" "Maybe (Maybe [Int])"
       `shouldBe` Right "Maybe (Maybe [Int])"
   it "pOccur should work" $ do
     parse (pOccur "?") "" ""
       `shouldBe` Right False
     parse (pOccur "?") "" "?"
       `shouldBe` Right True
-  it "pFldTypTup should work" $ do
-    parse pFldTypTup "" "Text? `bing`"
-      `shouldBe` Right ("Text", True, Just "bing")
-    parse pFldTypTup "" "Text `bing`"
-      `shouldBe` Right ("Text", False, Just "bing")
-    parse pFldTypTup "" "(Text)"
-      `shouldBe` Right ("Text", False, Nothing)
-    parse pFldTypTup "" "[Text]?"
-      `shouldBe` Right ("[Text]", True, Nothing)
-    parse pFldTypTup "" "((Text, Text))"
-      `shouldBe` Right ("(Text, Text)", False, Nothing)
-    parse pFldTypTup "" "((Text, (Text, Maybe Text)))"
-      `shouldBe` Right ("(Text, (Text, Maybe Text))", False, Nothing)
-    parse pFldTypTup "" "(Maybe Text)"
-      `shouldBe` Right ("Maybe Text", False, Nothing)
-    parse pFldTypTup "" "(Maybe [Text])"
-      `shouldBe` Right ("Maybe [Text]", False, Nothing)
-    parse pFldTypTup "" "(Maybe (Maybe [Int]))"
-      `shouldBe` Right ("Maybe (Maybe [Int])", False, Nothing)
+  it "pFldTyp should work" $ do
+    parse pFldTyp "" "a"
+      `shouldBe` Right (FldTypPoly "a")
+    parse pFldTyp "" "Text? `bing`"
+      `shouldBe` Right (FldTypNormal "Text" True (Just "bing") Nothing)
+    parse pFldTyp "" "Text `bing`"
+      `shouldBe` Right (FldTypNormal "Text" False (Just "bing") Nothing)
+    parse pFldTyp "" "(Text)"
+      `shouldBe` Right (FldTypNormal "Text" False Nothing Nothing)
+    parse pFldTyp "" "[Text]?"
+      `shouldBe` Right (FldTypNormal "[Text]" True Nothing Nothing)
+    parse pFldTyp "" "((Text, Text))"
+      `shouldBe` Right (FldTypNormal "(Text, Text)" False Nothing Nothing)
+    parse pFldTyp "" "((Text, (Text, Maybe Text)))"
+      `shouldBe` Right (FldTypNormal "(Text, (Text, Maybe Text))" False Nothing Nothing)
+    parse pFldTyp "" "(Maybe Text)"
+      `shouldBe` Right (FldTypNormal "Maybe Text" False Nothing Nothing)
+    parse pFldTyp "" "(Maybe [Text])"
+      `shouldBe` Right (FldTypNormal "Maybe [Text]" False Nothing Nothing)
+    parse pFldTyp "" "(Maybe (Maybe [Int]))"
+      `shouldBe` Right (FldTypNormal "Maybe (Maybe [Int])" False Nothing Nothing)
   it "pTblFld should work" $ do
     parse pTblFld "" "(Field SqlInt8)"
       `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") False [] Nothing)
@@ -101,17 +103,17 @@ tests = describe "Tedious.Parser" $ do
       `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") False [] (Just "3"))
   it "pField should work" $ do
     parse pField "" "firstName `first name` Text `Wang` (\"first_name\", Field SqlText) !UniqueDog !UniqueDogMaster DogA DogC"
-      `shouldBe` Right (Field ("firstName", Just "first name") ("Text", False, Just "Wang") (Just (TblFld (TblFldONR "first_name" "Field SqlText") False ["UniqueDog", "UniqueDogMaster"] Nothing)) [("DogA", False), ("DogC", False)])
+      `shouldBe` Right (Field ("firstName", Just "first name") (FldTypNormal "Text" False (Just "Wang") (Just (TblFld (TblFldONR "first_name" "Field SqlText") False ["UniqueDog", "UniqueDogMaster"] Nothing))) [ExtTypNormal "DogA" False, ExtTypNormal "DogC" False])
     parse pField "" "color `dog's color` ((Text, Text, Text)) DogB DogC"
-      `shouldBe` Right (Field ("color", Just "dog's color") ("(Text, Text, Text)", False, Nothing) Nothing [("DogB", False), ("DogC", False)])
+      `shouldBe` Right (Field ("color", Just "dog's color") (FldTypNormal "(Text, Text, Text)" False Nothing Nothing) [ExtTypNormal "DogB" False, ExtTypNormal "DogC" False])
   it "repPersistTyp should work" $ do
-    repPersistTyp (TediousTyp (Combo "Dog" Nothing Nothing) [Field ("name", Nothing) ("Text", False, Nothing) (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'dog'"))) []])
+    repPersistTyp (TediousTyp (Combo "Dog" Nothing Nothing) [Field ("name", Nothing) (FldTypNormal "Text" False Nothing (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'dog'")))) []])
       `shouldBe` ("Dog", TblPrimary ["name"], [TblUnique "One" ["name"]], [("name", "Text", False, Just "'dog'")])
     repPersistTyp
       ( TediousTyp
           (Combo "Dog" Nothing Nothing)
-          [ Field ("name", Nothing) ("Text", False, Nothing) (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'dog'"))) [],
-            Field ("work", Nothing) ("Text", False, Nothing) (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'work'"))) []
+          [ Field ("name", Nothing) (FldTypNormal "Text" False Nothing (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'dog'")))) [],
+            Field ("work", Nothing) (FldTypNormal "Text" False Nothing (Just (TblFld (TblFldOR "Field SqlInt8") True ["One"] (Just "'work'")))) []
           ]
       )
       `shouldBe` ( "Dog",

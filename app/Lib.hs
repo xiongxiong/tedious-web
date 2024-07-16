@@ -5,6 +5,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Lib where
 
@@ -22,7 +23,7 @@ import Tedious (tedious)
   Dog table dog deriving Exception -- dog
     id `ID` Int64 (Maybe (Field SqlInt8), Field SqlInt8)
     firstName `first name` Text `Wang` ("first_name", Field SqlText) !UniqueDog DogA DogC Dog_:a
-    secondName `second name` Text `Ji Rong` ("second_name", Maybe (Field SqlText), Field SqlText) !UniqueDog DogA Dog_:b
+    secondName `second name` Text `Ji Rong` ("second_name", Maybe (Field SqlText), Field SqlText) !UniqueDog DogA Dog_:b?
     address `home address` Text `Beijing` (Maybe (Field Text), Field Text) DogA Dog_:c -- where the dog is live in
     master `master's name` Text (Field Text) !UniqueDogMaster default=`'the lord'` DogA DogB? -- master
     masterAge `master's age` Int `26` DogC -- age of dog's master
@@ -39,6 +40,7 @@ import Tedious (tedious)
     age Int (Field SqlInt4) default=`0` CatA CatB?
     hobby (Maybe Text)? (Maybe (FieldNullable Text), FieldNullable Text) CatC? CatB
     color Text (Maybe (Field Text), Field Text) !UniqueCat CatB CatC
+    mind a?
 
   Page
     index `page index` Int `1`

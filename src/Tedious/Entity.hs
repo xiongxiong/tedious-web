@@ -4,12 +4,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Tedious.Entity where
 
 import Control.Exception (Exception)
 import Control.Lens (makeLenses, (&), (.~), (<&>), (?~), (^.))
-import Data.Aeson (ToJSON (..))
+import Data.Aeson (ToJSON (..), FromJSON (..))
 import Data.Aeson qualified as A
 import Data.Aeson.TH (deriveJSON)
 import Data.Default (Default (..))
@@ -35,6 +36,20 @@ Page
   index `页码` Natural `1`
   size `每页条数` Natural `10`
 
+PageO
+  page `分页` Page
+  total `总数` Natural
+  data `数据` a
+
+PageI
+  page `分页` Page?
+  filter `过滤` a?
+
+Rep
+  code `错误码` Natural
+  message `消息` Text
+  data `数据` a?
+
 Err deriving Exception
   code Natural
   message Text
@@ -56,56 +71,6 @@ SysOper
   time `时间` UTCTime (Field SqlTimestamptz)
 |]
 
-data PageO a = PageO
-  { _pageOPage :: Page,
-    _pageOTotal :: Natural,
-    _pageOData :: a
-  }
-
-deriving stock instance (Show a) => Show (PageO a)
-
-deriving stock instance (Eq a) => Eq (PageO a)
-
-deriving stock instance Generic (PageO a)
-
-deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "PageO"}) ''PageO
-
-instance (ToSchema a) => ToSchema (PageO a) where
-  declareNamedSchema = genericDeclareNamedSchema (schemaOptions {O.fieldLabelModifier = trimPrefixName_ "PageO"})
-
-makeLenses ''PageO
-
-data PageI a = PageI
-  { _pageIPage :: Maybe Page,
-    _pageIFilter :: Maybe a
-  }
-
-deriving stock instance (Show a) => Show (PageI a)
-
-deriving stock instance (Eq a) => Eq (PageI a)
-
-deriving stock instance Generic (PageI a)
-
-deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "PageI"}) ''PageI
-
-instance (ToSchema a) => ToSchema (PageI a) where
-  declareNamedSchema _ = do
-    pageSchema <- declareSchemaRef (Proxy :: Proxy (Maybe Page))
-    filtSchema <- declareSchemaRef (Proxy :: Proxy (Maybe a))
-    return $
-      named "PageI" $
-        mempty
-          & type_ ?~ OpenApiObject
-          & properties
-            .~ fromList
-              [ ("page", pageSchema <&> title ?~ "分页"),
-                ("filter", filtSchema <&> title ?~ "过滤条件")
-              ]
-          & required .~ ["index", "size"]
-          & example ?~ toJSON (PageI (Just $ Page 1 10) (Just def) :: PageI ())
-
-makeLenses ''PageI
-
 fillPage :: Page -> Natural -> b -> PageO b
 fillPage page total v =
   PageO
@@ -115,25 +80,6 @@ fillPage page total v =
     }
 
 --
-
-data Rep a = Rep
-  { _repCode :: Natural,
-    _repMessage :: Text,
-    _repData :: Maybe a
-  }
-
-deriving stock instance (Show a) => Show (Rep a)
-
-deriving stock instance (Eq a) => Eq (Rep a)
-
-deriving stock instance Generic (Rep a)
-
-deriveJSON (toJSONOptions {A.fieldLabelModifier = trimPrefixName_ "Rep"}) ''Rep
-
-instance (ToSchema a) => ToSchema (Rep a) where
-  declareNamedSchema = genericDeclareNamedSchema schemaOptions {O.fieldLabelModifier = trimPrefixName_ "Rep"}
-
-makeLenses ''Rep
 
 repOk :: Rep a
 repOk = Rep 0 "ok" Nothing
