@@ -60,8 +60,6 @@ tests = describe "Tedious.Parser" $ do
   it "pFldTypTup should work" $ do
     parse pFldTypTup "" "Text? `bing`"
       `shouldBe` Right ("Text", True, Just "bing")
-    parse pFldTypTup "" "Text ? `bing`"
-      `shouldBe` Right ("Text", True, Just "bing")
     parse pFldTypTup "" "Text `bing`"
       `shouldBe` Right ("Text", False, Just "bing")
     parse pFldTypTup "" "(Text)"
@@ -91,8 +89,6 @@ tests = describe "Tedious.Parser" $ do
       `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") True [] Nothing)
     parse pTblFld "" "(Field SqlInt8)# default=`3`"
       `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") True [] (Just "3"))
-    parse pTblFld "" "(Field SqlInt8) #"
-      `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") True [] Nothing)
     parse pTblFld "" "(Field SqlInt8)# !UniqueOne"
       `shouldBe` Right (TblFld (TblFldOR "Field SqlInt8") True ["UniqueOne"] Nothing)
     parse pTblFld "" "(Field SqlInt8)# !UniqueOne !UniqueTwo"

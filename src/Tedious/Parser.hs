@@ -143,13 +143,25 @@ isNameChar :: Char -> Bool
 isNameChar c = isAlphaNum c || c == '_' || c == '\''
 
 pName :: Parser String
-pName = lexeme $ takeWhile1P Nothing isNameChar
+pName = lexeme pName_
+
+pName_ :: Parser String
+pName_ = takeWhile1P Nothing isNameChar
 
 pNameLower :: Parser String
-pNameLower = lexeme ((<>) <$> takeWhile1P Nothing isLowerCase <*> takeWhileP Nothing isNameChar)
+pNameLower = lexeme pNameLower_
+
+pNameLower_ :: Parser String
+pNameLower_ = (<>) <$> takeWhile1P Nothing isLowerCase <*> takeWhileP Nothing isNameChar
 
 pNameUpper :: Parser String
-pNameUpper = lexeme ((<>) <$> takeWhile1P Nothing isUpperCase <*> takeWhileP Nothing isNameChar)
+pNameUpper = lexeme pNameUpper_
+
+pNameUpper_ :: Parser String
+pNameUpper_ = (<>) <$> takeWhile1P Nothing isUpperCase <*> takeWhileP Nothing isNameChar
+
+string :: String -> Parser String
+string = lexeme . MC.string
 
 symbol :: String -> Parser String
 symbol = MCL.symbol sc
@@ -157,8 +169,14 @@ symbol = MCL.symbol sc
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
 
+parens_ :: Parser a -> Parser a
+parens_ = between (symbol "(") (MC.char ')')
+
 parens' :: Parser String -> Parser String
 parens' p = join <$> sequence [pure "(", between (symbol "(") (symbol ")") p, pure ")"]
+
+parens'_ :: Parser String -> Parser String
+parens'_ p = join <$> sequence [pure "(", between (symbol "(") (MC.char ')') p, pure ")"]
 
 pTupleString :: Parser String
 pTupleString =
@@ -178,23 +196,35 @@ pTupleString =
 brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")
 
+brackets_ :: Parser a -> Parser a
+brackets_ = between (symbol "[") (MC.char ']')
+
 brackets' :: Parser String -> Parser String
 brackets' p = join <$> sequence [pure "[", between (symbol "[") (symbol "]") p, pure "]"]
+
+brackets'_ :: Parser String -> Parser String
+brackets'_ p = join <$> sequence [pure "[", between (symbol "[") (MC.char ']') p, pure "]"]
 
 quotes :: Parser a -> Parser a
 quotes = between (symbol "\"") (symbol "\"")
 
+quotes_ :: Parser a -> Parser a
+quotes_ = between (symbol "\"") (MC.char '\"')
+
 backQuotes :: Parser a -> Parser a
 backQuotes = between (symbol "`") (symbol "`")
+
+backQuotes_ :: Parser a -> Parser a
+backQuotes_ = between (symbol "`") (MC.char '`')
 
 backQuoteString :: Parser String
 backQuoteString = lexeme . backQuotes $ takeWhileP Nothing (\c -> isPrint c && c /= '`')
 
 pTblInfo :: Parser TblInfo
-pTblInfo = lexeme (MC.string "table") *> (parens (TblInfoQualified <$> pName <*> (symbol "," *> pName)) <|> (TblInfoUnQualified <$> pName))
+pTblInfo = string "table" *> (parens (TblInfoQualified <$> pName <*> (symbol "," *> pName)) <|> (TblInfoUnQualified <$> pName))
 
 pDevTyp :: Parser [DevTypName]
-pDevTyp = lexeme (MC.string "deriving") *> lexeme (M.some pNameUpper)
+pDevTyp = string "deriving" *> lexeme (M.some pNameUpper)
 
 pComboAttr :: Parser ComboAttr
 pComboAttr = (ComboTblInfo <$> pTblInfo) <|> (ComboDevTyp <$> pDevTyp)
@@ -234,7 +264,7 @@ pOccur s = lexeme $ (True <$ symbol s) <|> pure False
 
 pFldTypTup :: Parser (FldTypS, FldBasIsMaybe, Maybe FldSamp)
 pFldTypTup = do
-  _fldTypS <- lexeme $ pNameUpper <|> parens pFldTyp <|> brackets' pFldTyp
+  _fldTypS <- pNameUpper_ <|> parens_ pFldTyp <|> brackets'_ pFldTyp
   _fldBasIsM <- pOccur "?"
   _mFldSamp <- optional pFldSamp
   pure (_fldTypS, _fldBasIsM, _mFldSamp)
@@ -247,10 +277,10 @@ pTblFldDefault = lexeme $ (<>) <$> MC.string "default=" *> backQuoteString
 
 pTblFld :: Parser TblFld
 pTblFld =
-  pFldP (parens (TblFldOR <$> pFldO))
-    <|> pFldP (parens (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
-    <|> pFldP (parens (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
-    <|> pFldP (parens (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
+  pFldP (parens_ (TblFldOR <$> pFldO))
+    <|> pFldP (parens_ (TblFldOWR <$> (pFldM <|> pFldO) <*> (symbol "," *> pFldO)))
+    <|> pFldP (parens_ (TblFldONR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO))))
+    <|> pFldP (parens_ (TblFldONWR <$> quotes pName <*> (symbol "," *> (pFldM <|> pFldO)) <*> (symbol "," *> pFldO)))
   where
     pFldO = unwords <$> (((<>) . pure <$> (symbol "FieldNullable" <|> symbol "Field")) <*> (pure <$> pNameUpper))
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
