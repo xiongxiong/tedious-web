@@ -633,10 +633,6 @@ decPersist tts = do
   valD_ <- valD (varP name_) (normalB (litE (stringL unboundEntityDefs))) []
   pure [sigD_, valD_]
 
--- decPersist :: Maybe MigrateName -> Maybe PersistSetting -> String -> Q [Dec]
--- decPersist mMn (Just PersistUpperCase) s = share [mkPersist sqlSettings, mkMigrate (fromMaybe "migrateAll" mMn)] $(persistUpperCase s)
--- decPersist mMn _ s = share [mkPersist sqlSettings, mkMigrate (fromMaybe "migrateAll" mMn)] $(persistUpperCase s)
-
 strToTyp :: String -> Bool -> Type
 strToTyp s m =
   let ot = either (error "decTedious: cannot parse field type") id (parseType s)

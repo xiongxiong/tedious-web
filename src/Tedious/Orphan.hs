@@ -1,6 +1,6 @@
 {-# LANGUAGE KindSignatures #-}
 
-module Tedious.Orphan where
+module Tedious.Orphan () where
 
 import Control.Lens ((?~))
 import Data.Default (Default (..))

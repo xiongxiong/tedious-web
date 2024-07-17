@@ -1,7 +1,24 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE Arrows #-}
 
-module Tedious.Handler where
+module Tedious.Handler (
+  withDoc,
+  withDoc',
+  errorHandler,
+  authFail,
+  audit,
+  list,
+  list',
+  get,
+  get',
+  add,
+  add',
+  dup,
+  dup',
+  upd,
+  upd',
+  del
+) where
 
 import Control.Arrow (returnA)
 import Control.Lens ((^.))
