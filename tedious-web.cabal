@@ -6,12 +6,14 @@ cabal-version: 2.2
 
 name:           tedious-web
 version:        0.2.0.9
-description:    Please see the README on GitHub at <https://github.com/githubuser/tedious-web#readme>
-homepage:       https://github.com/githubuser/tedious-web#readme
-bug-reports:    https://github.com/githubuser/tedious-web/issues
-author:         Author name here
+synopsis:       Easily define multiple interrelated data types
+description:    A user-friendly web development tool that can easily define multiple interrelated data types
+category:       web development
+homepage:       https://github.com/xiongxiong/tedious-web#readme
+bug-reports:    https://github.com/xiongxiong/tedious-web/issues
+author:         WonderBear
 maintainer:     example@example.com
-copyright:      2024 Author name here
+copyright:      2024 WonderBear
 license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
@@ -21,7 +23,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/tedious-web
+  location: https://github.com/xiongxiong/tedious-web
 
 library
   exposed-modules:

@@ -70,3 +70,5 @@ system-ghc: true
 # nix:
 #   enable: true
 #   packages: [pkg-config]
+
+pvp-bounds: both
