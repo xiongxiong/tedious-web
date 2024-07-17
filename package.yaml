@@ -10,7 +10,6 @@ synopsis:            "Easily define multiple interrelated data types"
 
 extra-source-files:
 - README.md
-- CHANGELOG.md
 
 # Metadata used when publishing your package
 # synopsis:            Short description of your package
@@ -103,8 +102,8 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -ddump-splices
-    - -ddump-to-file
+    # - -ddump-splices
+    # - -ddump-to-file
     dependencies:
     - tedious-web
     - raw-strings-qq
