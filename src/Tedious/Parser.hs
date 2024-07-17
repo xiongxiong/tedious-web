@@ -498,26 +498,26 @@ decDefault (typName, _, flds) =
 decJSON :: TypInfo -> Q [Dec]
 decJSON (typName, _devClsNames, flds) = do
   let _fldExtVars = mapMaybe sel5 flds
+  let _typ = typWithVars typName _fldExtVars
   decToJSON <- do
     eToJ <- [|genericToJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
     let fToJ = FunD 'A.toJSON [Clause [] (NormalB eToJ) []]
     eToE <- [|genericToEncoding toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
     let fToE = FunD 'A.toEncoding [Clause [] (NormalB eToE) []]
     let preds =
-          [ [ AppT (ConT ''Generic) (VarT (mkName _fldExtVar)),
-              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Value)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
-              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Encoding)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
-              AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar))
+          [ [ AppT (ConT ''Generic) _typ,
+              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Value)) (ConT ''A.Zero)) (AppT (ConT ''Rep) _typ),
+              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Encoding)) (ConT ''A.Zero)) (AppT (ConT ''Rep) _typ)
             ]
             | _fldExtVar <- _fldExtVars
           ]
-    return $ InstanceD Nothing (join preds) (AppT (ConT ''ToJSON) (typWithVars typName _fldExtVars)) [fToJ, fToE]
+    return $ InstanceD Nothing (join preds) (AppT (ConT ''ToJSON) _typ) [fToJ, fToE]
   decFromJSON <- do
     e <- [|genericParseJSON toJSONOptions {A.fieldLabelModifier = trimPrefixName_ typName}|]
     let preds =
-          [ [ AppT (ConT ''Generic) (VarT (mkName _fldExtVar)),
-              AppT (AppT (ConT ''A.GFromJSON) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
-              AppT (ConT ''FromJSON) (VarT (mkName _fldExtVar))
+          [ [ AppT (ConT ''Generic) _typ,
+              AppT (AppT (ConT ''A.GFromJSON) (ConT ''A.Zero)) (AppT (ConT ''Rep) _typ)
+              -- AppT (ConT ''FromJSON) (VarT (mkName _fldExtVar))
             ]
             | _fldExtVar <- _fldExtVars
           ]
@@ -530,12 +530,9 @@ decToSchema (typName, _devClsNames, flds) = do
   let _fldExtVars = mapMaybe sel5 flds
   let preds =
         join
-          [ [ AppT (ConT ''Generic) (VarT (mkName _fldExtVar)),
-              AppT (ConT ''Default) (VarT (mkName _fldExtVar)),
-              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Value)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
-              AppT (AppT (AppT (ConT ''A.GToJSON') (ConT ''A.Encoding)) (ConT ''A.Zero)) (AppT (ConT ''Rep) (VarT (mkName _fldExtVar))),
-              AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar)),
-              AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
+          [ [ AppT (ConT ''Default) (VarT (mkName _fldExtVar))
+            , AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar))
+            , AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
             ]
             | _fldExtVar <- _fldExtVars
           ]
@@ -576,10 +573,6 @@ decToSchema (typName, _devClsNames, flds) = do
                 )
   let samp = appE (appE (varE 'uncurryN) (conE name)) sampTup
   let u4 = uInfixE (varE 'example) (varE '(L.?~)) (appE (varE 'toJSON) samp)
-  -- let u =
-  --       if null _fldExtVars
-  --         then uInfixE (uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3) (varE '(F.&)) u4
-  --         else uInfixE (uInfixE (uInfixE (varE 'mempty) (varE '(F.&)) u1) (varE '(F.&)) u2) (varE '(F.&)) u3
   let pureStmt =
         noBindS
           ( appE
