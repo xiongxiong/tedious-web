@@ -103,8 +103,8 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -ddump-splices
-    - -ddump-to-file
+    # - -ddump-splices
+    # - -ddump-to-file
     dependencies:
     - tedious-web
     - raw-strings-qq
