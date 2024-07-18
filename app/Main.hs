@@ -35,4 +35,4 @@ testToJson = putStrLn . unpack . encodeToLazyText $ Just ("hello" :: String)
 testToSchema :: IO ()
 testToSchema = do
   putStrLn . unpack . decodeUtf8 . encodePretty $ toSchema (Proxy :: Proxy (Tagged "hello" Int))
-  putStrLn . unpack . decodeUtf8 . encodePretty $ toSchema (Proxy :: Proxy Page)
+  -- putStrLn . unpack . decodeUtf8 . encodePretty $ toSchema (Proxy :: Proxy Page)

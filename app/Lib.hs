@@ -43,6 +43,4 @@ import Tedious (tedious)
     index `page index` Int `1`
     size `page size` Int `10`
 
-  Pig deriving Exception
-    name `pig's name` Text
 |]

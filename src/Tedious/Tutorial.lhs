@@ -1,20 +1,4 @@
-> {-# LANGUAGE DerivingStrategies #-}
-> {-# LANGUAGE QuasiQuotes #-}
-> {-# LANGUAGE UndecidableInstances #-}
-> {-# LANGUAGE ScopedTypeVariables #-}
-> {-# LANGUAGE StandaloneDeriving #-}
-
 > module Tedious.Tutorial () where
-
-> import Control.Exception (Exception)
-> import Data.Int (Int64)
-> import Data.Profunctor.Product
-> import Data.Text (Text)
-> import Data.Time (UTCTime)
-> import GHC.Generics (Generic)
-> import Opaleye (Field, FieldNullable, SqlText, SqlTimestamptz)
-> import Opaleye.SqlTypes (SqlInt8, SqlInt4)
-> import Tedious (tedious)
 
 [tedious|tedious_str|]
 
@@ -59,3 +43,5 @@ ABNF:
   name_lower = alpha_lower 1*char_name
   comment = "-" "-" *VCHAR
   end_of_line = *WSP 1*CRLF
+
+
