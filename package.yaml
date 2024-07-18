@@ -3,17 +3,16 @@ version:             0.2.1.0
 github:              "xiongxiong/tedious-web"
 license:             BSD-3-Clause
 author:              "WonderBear"
-maintainer:          "example@example.com"
+maintainer:          "ximengwuheng@163.com"
 copyright:           "2024 WonderBear"
-category:            "web development"
-synopsis:            "Easily define multiple interrelated data types"
 
 extra-source-files:
 - README.md
+- CHANGELOG.md
 
 # Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+synopsis:            Easily define multiple interrelated data types
+category:            Web
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is

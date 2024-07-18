@@ -8,17 +8,18 @@ name:           tedious-web
 version:        0.2.1.0
 synopsis:       Easily define multiple interrelated data types
 description:    A user-friendly web development tool that can easily define multiple interrelated data types
-category:       web development
+category:       Web
 homepage:       https://github.com/xiongxiong/tedious-web#readme
 bug-reports:    https://github.com/xiongxiong/tedious-web/issues
 author:         WonderBear
-maintainer:     example@example.com
+maintainer:     ximengwuheng@163.com
 copyright:      2024 WonderBear
 license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
+    CHANGELOG.md
 
 source-repository head
   type: git
