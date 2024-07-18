@@ -24,17 +24,6 @@ tests = describe "Tedious.Parser" $ do
       `shouldBe` Right (Combo "Dog" (Just (TblInfoUnQualified "dog")) (Just ["Show", "Eq"]))
     parse pCombo "" "Dog deriving Show Eq table dog"
       `shouldBe` Right (Combo "Dog" (Just (TblInfoUnQualified "dog")) (Just ["Show", "Eq"]))
-  it "pTupleString should work" $ do
-    parse pTupleString "" "(Text, Text)"
-      `shouldBe` Right "(Text, Text)"
-    parse pTupleString "" "(Text, Text, Int)"
-      `shouldBe` Right "(Text, Text, Int)"
-    parse pTupleString "" "(Maybe Text, Maybe Text, Maybe Int)"
-      `shouldBe` Right "(Maybe Text, Maybe Text, Maybe Int)"
-    parse pTupleString "" "((Text, Text), (Text, Text))"
-      `shouldBe` Right "((Text, Text), (Text, Text))"
-    parse pTupleString "" "((Text, (Text, Text)), (Text, Text))"
-      `shouldBe` Right "((Text, (Text, Text)), (Text, Text))"
   it "pFldTypS should work" $ do
     parse pFldTypS "" "Text"
       `shouldBe` Right "Text"

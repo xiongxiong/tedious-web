@@ -26,7 +26,7 @@ import Effectful.Error.Dynamic (Error, runErrorWith)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 import Opaleye (Field, FieldNullable, SqlInt8, SqlText, SqlTimestamptz)
-import Tedious.Parser (tedious)
+import Tedious.Quasi (tedious)
 import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
 [tedious|

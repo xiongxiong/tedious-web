@@ -27,7 +27,6 @@ import Data.Void (Void)
 import GHC.Generics (Generic (..), Rep)
 import Language.Haskell.Meta (parseType)
 import Language.Haskell.TH
-import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Opaleye (table, tableField, tableWithSchema)
 import Opaleye.Table (Table)
 import Tedious.Orphan ()
@@ -191,21 +190,6 @@ parens' p = join <$> sequence [pure "(", between (symbol "(") (symbol ")") p, pu
 parens'_ :: Parser String -> Parser String
 parens'_ p = join <$> sequence [pure "(", between (symbol "(") (MC.char ')') p, pure ")"]
 
-pTupleString :: Parser String
-pTupleString =
-  join
-    <$> sequence
-      [ pure "(",
-        between
-          (symbol "(")
-          (symbol ")")
-          ( (<>)
-              <$> ((unwords <$> M.some pNameUpper) <|> pTupleString)
-              <*> (concat <$> M.some (unwords <$> (((<>) . pure <$> symbol ",") <*> (M.some pNameUpper <|> (pure <$> pTupleString)))))
-          ),
-        pure ")"
-      ]
-
 brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")
 
@@ -262,12 +246,13 @@ pFldNameAndTitle :: Parser (FldName, Maybe FldLabel)
 pFldNameAndTitle = (,) <$> pFldName <*> optional pFldTitle
 
 pFldTypS :: Parser FldTypS
-pFldTypS =
-  try (unwords <$> (((<>) . pure . unwords <$> M.some pNameUpper) <*> (pure . unwords <$> M.some pFldTypS)))
-    <|> try (parens' pFldTypS)
-    <|> try (brackets' pFldTypS)
-    <|> try pTupleString
-    <|> (unwords <$> M.some pNameUpper)
+pFldTypS = try (parens protoTypS) <|> protoTypS
+  where
+    protoTypS = try arrayTypS <|> try tupleTypS <|> comboTypS
+    arrayTypS = brackets' (lexeme pFldTypS)
+    tupleTypS = parens' $ unwords <$> ((:) <$> lexeme pFldTypS <*> M.many tuplePart)
+    comboTypS = unwords <$> ((<>) <$> M.some pNameUpper <*> M.many pFldTypS)
+    tuplePart = unwords <$> ((:) <$> symbol "," <*> (pure <$> lexeme pFldTypS))
 
 pFldSamp :: Parser FldSamp
 pFldSamp = backQuoteString
@@ -404,15 +389,6 @@ strPersistTyp (basTypName, TblPrimary pNames, uCons, tblFlds) =
         else Just . unlines $ pure basTypName <> (indent 1 <$> catMaybes ((Just <$> tblFldLines) <> pure primaryLine <> (Just <$> uniqueLines)))
   where
     indent n s = replicate n '\t' <> s
-
-tedious :: QuasiQuoter
-tedious =
-  QuasiQuoter
-    { quoteExp = error "tedious cannot be used as exp",
-      quotePat = error "tedious cannot be used as pat",
-      quoteType = error "tedious cannot be used as type",
-      quoteDec = decTedious
-    }
 
 decTedious ::
   String ->

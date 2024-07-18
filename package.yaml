@@ -1,5 +1,5 @@
 name:                tedious-web
-version:             0.2.0.9
+version:             0.2.1.0
 github:              "xiongxiong/tedious-web"
 license:             BSD-3-Clause
 author:              "WonderBear"
@@ -91,7 +91,8 @@ library:
   - Tedious
   - Tedious.Entity
   - Tedious.Handler
-  - Tedious.Parser
+  - Tedious.Quasi
+  - Tedious.Tutorial
   - Tedious.Util
 
 executables:
