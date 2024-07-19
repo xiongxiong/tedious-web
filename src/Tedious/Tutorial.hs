@@ -1,8 +1,7 @@
-> module Tedious.Tutorial () where
+module Tedious.Tutorial () where
 
-[tedious|tedious_str|]
-
-ABNF:
+{-|
+QuasiQuote tedious' ABNF:
   tedious_str = *WSP indent_block
   indent_block = type_info 1*type_field
   type_info = type_name *type_attr [comment] end_of_line
@@ -43,5 +42,5 @@ ABNF:
   name_lower = alpha_lower 1*char_name
   comment = "-" "-" *VCHAR
   end_of_line = *WSP 1*CRLF
-
+-}
 

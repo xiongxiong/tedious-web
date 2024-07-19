@@ -8,4 +8,10 @@ and this project adheres to the
 
 ## Unreleased
 
-## 0.1.0.0 - YYYY-MM-DD
+## 0.2.1.1 - 2024-07-19
+
+* Write ABNF rules for the parser.
+
+## 0.2.1.2 - 2024-07-19
+
+* Added ABNF definition for tedious QuasiQuote.
