@@ -66,7 +66,7 @@ SysOper
   name `名称` Text (Field SqlText) SysOper'
   target `目标` Text (Field SqlText) SysOper'
   content `内容` Text? (Maybe (FieldNullable SqlText), FieldNullable SqlText) SysOper'
-  time `时间` UTCTime (Field SqlTimestamptz)
+  time `时间` UTCTime (Maybe (Field SqlTimestamptz), Field SqlTimestamptz) default=`CURRENT_TIMESTAMP`
 |]
 
 fillPage :: Page -> Natural -> b -> PageO b

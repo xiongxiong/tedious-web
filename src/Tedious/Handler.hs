@@ -85,7 +85,6 @@ audit envPool user (handler, oper) =
     res <- handler -< request
     arrM
       ( const $ do
-          now <- liftIO getCurrentTime
           pool <- asks envPool
           liftIO . withResource pool $ \conn -> do
             runInsert
@@ -98,7 +97,7 @@ audit envPool user (handler, oper) =
                         sqlStrictText . _sysOper'Name $ oper,
                         sqlStrictText . _sysOper'Target $ oper,
                         toNullable . sqlStrictText <$> _sysOper'Content oper,
-                        sqlUTCTime now
+                        Nothing
                       )
                     ],
                   iReturning = rReturning (const ()),
