@@ -46,6 +46,8 @@ type ExtTypName = String
 
 type FldName = String
 
+type FldBasOptional = Bool
+
 type FldLabel = String -- openapi label
 
 type FldTypS = String
@@ -103,7 +105,7 @@ data ComboAttr = ComboTblInfo TblInfo | ComboDevTyp [DevTypName]
 
 data Field
   = Field
-      (FldName, Maybe FldLabel) -- (field name, field label used in openapi schema)
+      (FldName, FldBasOptional, Maybe FldLabel) -- (field name, appear in base type or not, field label used in openapi schema)
       FldTyp -- field type
       [ExtTyp] -- (name of ext type which has this field, the field of the ext type is maybe or not)
   deriving stock (Eq, Show, Generic)
@@ -242,8 +244,18 @@ pFldName = pNameLower
 pFldTitle :: Parser FldLabel
 pFldTitle = backQuoteString
 
-pFldNameAndTitle :: Parser (FldName, Maybe FldLabel)
-pFldNameAndTitle = (,) <$> pFldName <*> optional pFldTitle
+pOccur :: String -> Parser Bool
+pOccur s = (True <$ symbol s) <|> pure False
+
+pOccur_ :: String -> Parser Bool
+pOccur_ s = lexeme $ (True <$ symbol s) <|> pure False
+
+pFldNameAndTitle :: Parser (FldName, FldBasOptional, Maybe FldLabel)
+pFldNameAndTitle = do
+  _fldBasOptional <- pOccur "*"
+  _fldName <- pFldName
+  _mFldLabel <- optional pFldTitle
+  pure (_fldName, _fldBasOptional, _mFldLabel)
 
 pFldTypS :: Parser FldTypS
 pFldTypS = try (parens protoTypS) <|> protoTypS
@@ -257,11 +269,8 @@ pFldTypS = try (parens protoTypS) <|> protoTypS
 pFldSamp :: Parser FldSamp
 pFldSamp = backQuoteString
 
-pOccur :: String -> Parser Bool
-pOccur s = lexeme $ (True <$ symbol s) <|> pure False
-
 pFldTyp :: Parser FldTyp
-pFldTyp = try (FldTypNormal <$> (pNameUpper_ <|> parens_ pFldTypS <|> brackets'_ pFldTypS) <*> pOccur "?" <*> optional pFldSamp <*> optional pTblFld) <|> (FldTypPoly <$> pNameLower_ <*> pOccur "?")
+pFldTyp = try (FldTypNormal <$> (pNameUpper_ <|> parens_ pFldTypS <|> brackets'_ pFldTypS) <*> pOccur_ "?" <*> optional pFldSamp <*> optional pTblFld) <|> (FldTypPoly <$> pNameLower_ <*> pOccur_ "?")
 
 pTblFldUnique :: Parser TblFldUnique
 pTblFldUnique = lexeme $ MC.char '!' *> pNameUpper
@@ -278,10 +287,10 @@ pTblFld =
   where
     pFldO = unwords <$> (((<>) . pure <$> (symbol "FieldNullable" <|> symbol "Field")) <*> (pure <$> pNameUpper))
     pFldM = unwords <$> ((<>) . pure <$> symbol "Maybe" <*> (pure <$> parens' pFldO))
-    pFldP p = try (TblFld <$> p <*> pOccur "#" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
+    pFldP p = try (TblFld <$> p <*> pOccur_ "#" <*> M.many pTblFldUnique <*> optional pTblFldDefault)
 
 pExtName :: Parser ExtTyp
-pExtName = try (ExtTypPoly <$> pNameUpper_ <*> (MC.char ':' *> pNameLower_) <*> pOccur "?") <|> (ExtTypNormal <$> pNameUpper_ <*> pOccur "?")
+pExtName = try (ExtTypPoly <$> pNameUpper_ <*> (MC.char ':' *> pNameLower_) <*> pOccur_ "?") <|> (ExtTypNormal <$> pNameUpper_ <*> pOccur_ "?")
 
 pField :: Parser Field
 pField = Field <$> pFldNameAndTitle <*> pFldTyp <*> M.many pExtName
@@ -307,18 +316,22 @@ repTediousTyp (TediousTyp (Combo basTypName _ devs) flds) =
     defBase _basTypName tuples =
       HM.insert
         _basTypName
-        ( tuples
-            <&> ( \((_fldName, _mFldTitle), _fldTyp) -> case _fldTyp of
+        ( mapMaybe
+            ( \((_fldName, _fldBasOptional, _mFldTitle), _fldTyp) ->
+                if _fldBasOptional
+                  then Nothing
+                  else Just $ case _fldTyp of
                     FldTypPoly _fldExtVar _fldExtIsM -> (_fldName, _mFldTitle, _fldTyp, _fldExtIsM, Just _fldExtVar)
                     _ -> (_fldName, _mFldTitle, _fldTyp, False, Nothing)
-                )
+            )
+            tuples
         )
     defExts [] m = m
     defExts (Field _ _ [] : ds) m = defExts ds m
-    defExts (Field (_fldName, _mFldTitle) _fldTyp (extTyp : extTyps) : _flds) m =
+    defExts (Field (_fldName, _fldBasOptional, _mFldTitle) _fldTyp (extTyp : extTyps) : _flds) m =
       let (_extTypName, _fldExtIsM, _mFldExtVar) = procExtTyp extTyp
           m' = HM.insert _extTypName (snoc (HM.lookupDefault [] _extTypName m) (_fldName, _mFldTitle, _fldTyp, _fldExtIsM, _mFldExtVar)) m
-       in defExts (Field (_fldName, _mFldTitle) _fldTyp extTyps : _flds) m'
+       in defExts (Field (_fldName, _fldBasOptional, _mFldTitle) _fldTyp extTyps : _flds) m'
     procExtTyp extTyp = case extTyp of
       ExtTypNormal _extTypName _fldExtIsM -> (_extTypName, _fldExtIsM, Nothing)
       ExtTypPoly _extTypName _fldExtVar _fldExtIsM -> (_extTypName, _fldExtIsM, Just _fldExtVar)
@@ -326,7 +339,7 @@ repTediousTyp (TediousTyp (Combo basTypName _ devs) flds) =
 repOpaleye :: [Field] -> RepOpaleye
 repOpaleye = mapMaybe go
   where
-    go (Field (_fldName, _) _fldTyp _) = case _fldTyp of
+    go (Field (_fldName, _, _) _fldTyp _) = case _fldTyp of
       FldTypNormal _fldTypS _fldBasIsM _ _mTblFld -> case _mTblFld of
         Nothing -> Nothing
         Just (TblFld _tblFld _ _ _) -> case _tblFld of
@@ -344,13 +357,13 @@ repPersistTyp (TediousTyp (Combo basTypName _ _) flds) =
    in (basTypName, primaryCons, uniqueCons, persistFlds)
   where
     genPrimaryCons = mapMaybe extractPrimary
-    extractPrimary (Field (_fldName, _) _fldTyp _) = case _fldTyp of
+    extractPrimary (Field (_fldName, _, _) _fldTyp _) = case _fldTyp of
       FldTypNormal _fldTypS _fldBasIsM _ _mTblFld -> case _mTblFld of
         Nothing -> Nothing
         Just (TblFld _ isPrimary _ _def) -> if isPrimary then Just _fldName else Nothing
       _ -> Nothing
     genUniqueCons [] uCons = uCons
-    genUniqueCons ((Field (_fldName, _) _fldTyp _) : _flds) uCons = case _fldTyp of
+    genUniqueCons ((Field (_fldName, _, _) _fldTyp _) : _flds) uCons = case _fldTyp of
       FldTypNormal _fldTypS _fldBasIsM _ _mTblFld -> case _mTblFld of
         Nothing -> genUniqueCons _flds uCons
         Just (TblFld _ _ uNames _) -> genUniqueCons _flds (extractUnique _fldName uNames uCons)
@@ -362,7 +375,7 @@ repPersistTyp (TediousTyp (Combo basTypName _ _) flds) =
       if uName == uConName
         then reverse uCons_ <> (TblUnique uConName (snoc uConFlds _fldName) : uCons)
         else extractUniqueOne _fldName uName uCons_ (uCon : uCons)
-    genPersistFld (Field (_fldName, _) _fldTyp _) = case _fldTyp of
+    genPersistFld (Field (_fldName, _, _) _fldTyp _) = case _fldTyp of
       FldTypNormal _fldTypS _fldBasIsM _ _mTblFld -> case _mTblFld of
         Nothing -> Nothing
         Just (TblFld _ _ _ _def) ->
@@ -506,9 +519,9 @@ decToSchema (typName, _devClsNames, flds) = do
   let _fldExtVars = mapMaybe sel5 flds
   let preds =
         join
-          [ [ AppT (ConT ''Default) (VarT (mkName _fldExtVar))
-            , AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar))
-            , AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
+          [ [ AppT (ConT ''Default) (VarT (mkName _fldExtVar)),
+              AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar)),
+              AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
             ]
             | _fldExtVar <- _fldExtVars
           ]

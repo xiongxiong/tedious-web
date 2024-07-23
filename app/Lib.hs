@@ -27,7 +27,7 @@ import Tedious (tedious)
     age `dog's age` Int `8` DogA DogB?
     hobby `dog's hobby` (Maybe Text)? `Just "meat"` (FieldNullable Text) DogC? DogB
     color `dog's color` ((Text, Text, Text)) DogB DogC
-    friends `dog's friends` [Text] DogC
+    *friends `dog's friends` [Text] DogC
     createdAt `creation time` UTCTime ("cteated_at", Maybe (FieldNullable SqlTimestamptz), FieldNullable SqlTimestamptz) default=`CURRENT_TIMESTAMP` DogB DogC?
 
   Cat table (public, cat)
