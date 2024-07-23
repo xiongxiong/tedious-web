@@ -253,10 +253,8 @@ get envPool tbl idf r2d =
    in (handler, sysOper)
 
 get' ::
-  forall i fi d rfs r eff env es h ts. -- (record id) (field id) data (table read fields) (table record) eff effects (app env) arrow traits
-  ( Default FromFields rfs r,
-    Sel1 rfs (Field fi),
-    Reader env :> es,
+  forall i d eff env es h ts. -- (record id) data eff effects (app env) arrow traits
+  ( Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
     StdHandler h eff,
@@ -265,23 +263,17 @@ get' ::
   ) =>
   SysOperTargetName ->
   (env -> Pool Connection) ->
-  Select rfs ->
-  (i -> Field fi) ->
-  (r -> d) ->
+  (Connection -> i -> IO (Maybe d)) ->
   (RequestHandler h ts, SysOper')
-get' tName envPool sel idf r2d =
+get' tName envPool sel =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         (md :: Maybe d) <-
           arrM
             ( \tid -> do
                 pool <- asks envPool
-                rs <- liftIO . withResource pool $
-                  \conn -> runSelect conn $ do
-                    r <- sel
-                    where_ $ sel1 r .== idf tid
-                    pure r
-                pure . listToMaybe $ r2d <$> rs
+                liftIO . withResource pool $
+                  \conn -> sel conn tid
             )
             -<
               tid
