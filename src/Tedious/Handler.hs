@@ -22,7 +22,7 @@ module Tedious.Handler (
 
 import Control.Arrow (returnA)
 import Control.Lens ((^.))
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, isJust)
 import Data.Pool (Pool, withResource)
 import Data.Profunctor.Product.Default (Default)
 import Data.Text (Text, pack)
@@ -30,13 +30,15 @@ import Data.Time (getCurrentTime)
 import Data.Tuple.All (Sel1 (..))
 import Database.PostgreSQL.Simple (Connection)
 import Effectful (Eff, IOE, MonadIO (..), (:>))
-import Effectful.Error.Dynamic (throwError)
+import Effectful.Error.Dynamic (throwError, Error)
 import Effectful.Reader.Dynamic (Reader, asks)
 import Network.HTTP.Types qualified as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, Select, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, sqlUTCTime, toNullable, where_, (.==))
 import Opaleye.Internal.Table (tableIdentifier)
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), SysOperTargetName, catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
+import Control.Monad (when)
+import Data.Foldable (for_)
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
 withDoc summ desc handler = setDescription desc <<< setSummary summ <<< handler
@@ -292,27 +294,31 @@ add ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
+  (a -> Eff es (Maybe Err)) ->
   Table wfs rfs ->
   (a -> [wfs]) ->
   (RequestHandler h ts, SysOper')
-add envPool tbl a2t =
+add envPool chk tbl a2t =
   let handler = requestBody @a JSON errorHandler $
         proc request -> do
           let toAdd = pick @(Body JSON a) $ from request
           rep_ <-
             arrM
-              ( \toAdd -> catchRep $ do
-                  pool <- asks envPool
-                  ids <- liftIO . withResource pool $ \conn -> do
-                    runInsert
-                      conn
-                      Insert
-                        { iTable = tbl,
-                          iRows = a2t toAdd,
-                          iReturning = rReturning sel1,
-                          iOnConflict = Nothing
-                        }
-                  maybe (throwError $ Err 1 "insert failure") (return . rep) (listToMaybe ids)
+              ( \toAdd -> do
+                  mErr <- chk toAdd
+                  catchRep $ do
+                    for_ mErr throwError
+                    pool <- asks envPool
+                    ids <- liftIO . withResource pool $ \conn -> do
+                      runInsert
+                        conn
+                        Insert
+                          { iTable = tbl,
+                            iRows = a2t toAdd,
+                            iReturning = rReturning sel1,
+                            iOnConflict = Nothing
+                          }
+                    maybe (throwError $ Err 1 "insert failure") (return . rep) (listToMaybe ids)
               )
               -<
                 toAdd
