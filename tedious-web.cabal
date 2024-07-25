@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           tedious-web
-version:        0.2.1.4
+version:        0.2.2.0
 synopsis:       Easily define multiple interrelated data types
 description:    A user-friendly web development tool that can easily define multiple interrelated data types
 category:       Web

@@ -52,10 +52,6 @@ Err deriving Exception
   code Natural
   message Text
 
-SysAdmin
-  name Text
-  pass Text
-
 SysUser
   name Text (Field SqlText)
   pass Text (Field SqlText)
