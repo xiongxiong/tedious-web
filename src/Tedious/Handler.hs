@@ -32,6 +32,7 @@ import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), F
 import Opaleye.Internal.Table (tableIdentifier)
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
+import Data.Foldable (for_)
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
 withDoc summ desc handler = setDescription desc <<< setSummary summ <<< handler
@@ -205,16 +206,20 @@ add ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
+  (a -> eff (Maybe Err)) ->
   Table wfs rfs ->
   (a -> [wfs]) ->
   (RequestHandler h ts, SysOper')
-add envPool tbl a2t =
+add envPool chk tbl a2t =
   let handler = requestBody @a JSON errorHandler $
         proc request -> do
           let toAdd = pick @(Body JSON a) $ from request
           rep_ <-
             arrM
-              ( \toAdd -> catchRep $ do
+              ( \toAdd -> do
+                mErr <- chk toAdd
+                catchRep $ do
+                  for_ mErr throwError
                   pool <- asks envPool
                   ids <- liftIO . withResource pool $ \conn -> do
                     runInsert
@@ -293,19 +298,23 @@ upd ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep d), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
+  (u -> eff (Maybe Err)) ->
   Table wfs rfs ->
   (i -> Field fi) ->
   (u -> (rfs -> wfs)) ->
   (r -> d) ->
   (RequestHandler h ts, SysOper')
-upd envPool tbl idf u2t r2d =
+upd envPool chk tbl idf u2t r2d =
   let handler = requestBody @u JSON errorHandler $
         proc request -> do
           let tid = pick @(PathVar "id" i) $ from request
           let toUpd = pick @(Body JSON u) $ from request
           ru <-
             arrM
-              ( \(tid, toUpd) -> catchRep $ do
+              ( \(tid, toUpd) -> do
+                mErr <- chk toUpd
+                catchRep $ do
+                  for_ mErr throwError
                   pool <- asks envPool
                   ru <- liftIO . withResource pool $ \conn -> do
                     runUpdate
