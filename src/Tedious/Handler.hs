@@ -32,7 +32,6 @@ import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), F
 import Opaleye.Internal.Table (tableIdentifier)
 import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
-import Data.Foldable (for_)
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
 withDoc summ desc handler = setDescription desc <<< setSummary summ <<< handler
@@ -206,7 +205,7 @@ add ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep i), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  (a -> eff (Maybe Err)) ->
+  (a -> eff (Either Err a)) ->
   Table wfs rfs ->
   (a -> [wfs]) ->
   (RequestHandler h ts, SysOper')
@@ -217,20 +216,20 @@ add envPool chk tbl a2t =
           rep_ <-
             arrM
               ( \toAdd -> do
-                mErr <- chk toAdd
-                catchRep $ do
-                  for_ mErr throwError
-                  pool <- asks envPool
-                  ids <- liftIO . withResource pool $ \conn -> do
-                    runInsert
-                      conn
-                      Insert
-                        { iTable = tbl,
-                          iRows = a2t toAdd,
-                          iReturning = rReturning sel1,
-                          iOnConflict = Nothing
-                        }
-                  maybe (throwError $ Err 1 "insert failure") (return . rep) (listToMaybe ids)
+                  chkRes <- chk toAdd
+                  catchRep $ do
+                    toAdd_ <- either throwError pure chkRes
+                    pool <- asks envPool
+                    ids <- liftIO . withResource pool $ \conn -> do
+                      runInsert
+                        conn
+                        Insert
+                          { iTable = tbl,
+                            iRows = a2t toAdd_,
+                            iReturning = rReturning sel1,
+                            iOnConflict = Nothing
+                          }
+                    maybe (throwError $ Err 1 "insert failure") (return . rep) (listToMaybe ids)
               )
               -<
                 toAdd
@@ -298,7 +297,7 @@ upd ::
     Sets h '[RequiredResponseHeader "Content-Type" Text, Body JSON (Rep d), Body JSON (Rep ())]
   ) =>
   (env -> Pool Connection) ->
-  (u -> eff (Maybe Err)) ->
+  (u -> eff (Either Err u)) ->
   Table wfs rfs ->
   (i -> Field fi) ->
   (u -> (rfs -> wfs)) ->
@@ -312,20 +311,20 @@ upd envPool chk tbl idf u2t r2d =
           ru <-
             arrM
               ( \(tid, toUpd) -> do
-                mErr <- chk toUpd
-                catchRep $ do
-                  for_ mErr throwError
-                  pool <- asks envPool
-                  ru <- liftIO . withResource pool $ \conn -> do
-                    runUpdate
-                      conn
-                      Update
-                        { uTable = tbl,
-                          uUpdateWith = u2t toUpd,
-                          uWhere = (.== idf tid) . sel1,
-                          uReturning = rReturning id
-                        }
-                  maybe (throwError $ Err 1 "insert failure") (return . rep . r2d) (listToMaybe ru)
+                  chkRes <- chk toUpd
+                  catchRep $ do
+                    toUpd_ <- either throwError pure chkRes
+                    pool <- asks envPool
+                    ru <- liftIO . withResource pool $ \conn -> do
+                      runUpdate
+                        conn
+                        Update
+                          { uTable = tbl,
+                            uUpdateWith = u2t toUpd_,
+                            uWhere = (.== idf tid) . sel1,
+                            uReturning = rReturning id
+                          }
+                    maybe (throwError $ Err 1 "insert failure") (return . rep . r2d) (listToMaybe ru)
               )
               -<
                 (tid, toUpd)
