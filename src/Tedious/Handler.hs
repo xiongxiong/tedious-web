@@ -5,7 +5,7 @@ module Tedious.Handler
   ( withDoc,
     withDoc',
     errorHandler,
-    authFail,
+    basicAuthFail,
     audit,
     list,
     get,
@@ -54,11 +54,11 @@ errorHandler = proc (_, err) -> respondA HTTP.ok200 JSON -< (repErr 1 (pack . sh
 --   h (Request `With` ts, BasicAuthError ()) Response
 -- authFail = respondUnauthorized "Basic" "MyRealm"
 
-authFail ::
+basicAuthFail ::
   ( StdHandler h (Eff es)
   ) =>
   h (Request `With` ts, BasicAuthError ()) Response
-authFail = proc (_request, err) -> case err of
+basicAuthFail = proc (_, err) -> case err of
   BasicAuthAttributeError () ->
     respondA HTTP.forbidden403 PlainText -< "Forbidden" :: Text
   _ ->

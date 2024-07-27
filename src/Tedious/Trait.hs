@@ -1,24 +1,28 @@
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Tedious.Trait (
-  RequestID (..),
-  RequestIDValue (..),
-  RequestIDMissing (..),
-  requestID
-) where
+module Tedious.Trait
+  ( RequestID (..),
+    RequestIDValue (..),
+    RequestIDMissing (..),
+    RequestIDQuery,
+    RequestIDHeader,
+    RequestIDCookie,
+    requestID
+  )
+where
 
+import Control.Arrow (ArrowChoice)
 import Data.OpenApi (ApiKeyLocation (..), ApiKeyParams (ApiKeyParams, _apiKeyIn, _apiKeyName), SecurityScheme (..), SecuritySchemeType (SecuritySchemeApiKey))
 import Data.Proxy (Proxy (..))
 import Data.String (IsString (..))
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+import WebGear.Core (Middleware, probe)
 import WebGear.OpenApi (Absence, Attribute, Cookie, Existence (Optional), Get (..), HasTrait (..), OpenApiHandler (..), ParseStyle (Lenient), Prerequisite, QueryParam, Request, RequestHeader, Response, Set (..), Text, With, pick, returnA)
 import WebGear.OpenApi.Trait.Auth (addSecurityScheme)
 import WebGear.Server (ServerHandler)
-import Control.Arrow (ArrowChoice)
-import WebGear.Core (Middleware, probe)
 
-data RequestID (location :: ApiKeyLocation) (name :: Symbol) = RequestID
+data RequestID (loc :: ApiKeyLocation) (name :: Symbol) = RequestID
 
 newtype RequestIDValue = RequestIDValue Text
 
@@ -92,7 +96,7 @@ instance Set (OpenApiHandler m) (RequestID ApiKeyCookie name) where
     OpenApiHandler m (With Response ts, Attribute (RequestID ApiKeyCookie name) Response) (With Response (RequestID ApiKeyCookie name : ts))
   setTrait RequestID _ = OpenApiHandler pure
 
-requestID :: (Get h r, r ~ RequestID (location :: ApiKeyLocation) name, ArrowChoice h, Prerequisite r ts) => h (Request `With` ts, RequestIDMissing) Response -> Middleware h ts (r : ts)
+requestID :: forall loc name r h ts . (Get h r, r ~ RequestID loc name, ArrowChoice h, Prerequisite r ts) => h (Request `With` ts, RequestIDMissing) Response -> Middleware h ts (r : ts)
 requestID errorHandler nextHandler =
   proc request -> do
     result <- probe RequestID -< request

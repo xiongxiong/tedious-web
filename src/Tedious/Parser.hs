@@ -482,7 +482,7 @@ decDefault :: TypInfo -> Q [Dec]
 decDefault (typName, _, flds) =
   let _fldExtVars = mapMaybe sel5 flds
       preds = [AppT (ConT ''Default) (VarT (mkName _fldExtVar)) | _fldExtVar <- _fldExtVars]
-   in pure . pure $ StandaloneDerivD Nothing preds (AppT (ConT ''Default) (typWithVars typName _fldExtVars))
+   in pure . pure $ StandaloneDerivD (Just AnyclassStrategy) preds (AppT (ConT ''Default) (typWithVars typName _fldExtVars))
 
 decJSON :: TypInfo -> Q [Dec]
 decJSON (typName, _devClsNames, flds) = do

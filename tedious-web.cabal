@@ -32,11 +32,11 @@ library
       Tedious.Entity
       Tedious.Handler
       Tedious.Quasi
+      Tedious.Trait
       Tedious.Util
   other-modules:
       Tedious.Orphan
       Tedious.Parser
-      Tedious.Trait
       Paths_tedious_web
   autogen-modules:
       Paths_tedious_web

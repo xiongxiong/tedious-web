@@ -95,6 +95,7 @@ library:
   - Tedious.Entity
   - Tedious.Handler
   - Tedious.Quasi
+  - Tedious.Trait
   - Tedious.Util
 
 executables:

@@ -1,12 +1,6 @@
 module Tedious
-  ( module Tedious.Quasi,
-    module Tedious.Util,
-    module Tedious.Entity,
-    module Tedious.Handler,
+  ( module Tedious.Quasi
   )
 where
 
-import Tedious.Entity
-import Tedious.Handler
 import Tedious.Quasi
-import Tedious.Util
