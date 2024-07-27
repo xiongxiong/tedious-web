@@ -1,5 +1,5 @@
 name:                tedious-web
-version:             0.2.2.0
+version:             0.2.3.0
 github:              "xiongxiong/tedious-web"
 license:             BSD-3-Clause
 author:              "WonderBear"
@@ -49,6 +49,8 @@ dependencies:
 - tuple
 - unordered-containers
 - webgear-core
+- webgear-server
+- webgear-openapi
 
 default-extensions:
 - DataKinds
