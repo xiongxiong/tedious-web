@@ -324,7 +324,7 @@ upd envPool chk tbl idf u2t r2d =
                             uWhere = (.== idf tid) . sel1,
                             uReturning = rReturning id
                           }
-                    maybe (throwError $ Err 1 "insert failure") (return . rep . r2d) (listToMaybe ru)
+                    maybe (throwError $ Err 1 "update failure") (return . rep . r2d) (listToMaybe ru)
               )
               -<
                 (tid, toUpd)
@@ -344,9 +344,9 @@ del ::
   ) =>
   (env -> Pool Connection) ->
   Table wfs rfs ->
-  (i -> Field fi) ->
+  (i -> rfs -> Field SqlBool) ->
   (RequestHandler h ts, SysOper')
-del envPool tbl idf =
+del envPool tbl con =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         r <-
@@ -358,7 +358,7 @@ del envPool tbl idf =
                     runDelete conn $
                       Delete
                         { dTable = tbl,
-                          dWhere = (.== idf tid) . sel1,
+                          dWhere = con tid,
                           dReturning = rCount
                         }
                 pure $ if c == 1 then repOk else repErr 1 "delete failure"
