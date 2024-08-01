@@ -1,5 +1,5 @@
 name:                tedious-web
-version:             0.2.3.0
+version:             0.2.3.1
 github:              "xiongxiong/tedious-web"
 license:             BSD-3-Clause
 author:              "WonderBear"
@@ -27,6 +27,7 @@ dependencies:
 - data-default
 - data-default-instances-containers
 - effectful-core
+- exceptions
 - extra
 - generic-lens
 - haskell-src-meta

@@ -516,15 +516,16 @@ decJSON (typName, _devClsNames, flds) = do
 decToSchema :: TypInfo -> Q [Dec]
 decToSchema (typName, _devClsNames, flds) = do
   let name = mkName typName
-  let _fldExtVars = mapMaybe sel5 flds
+  let _fldExtMVars = mapMaybe (\fld -> (,) (sel4 fld) <$> sel5 fld) flds
   let preds =
         join
-          [ [ AppT (ConT ''Default) (VarT (mkName _fldExtVar)),
-              AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar)),
-              AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
-            ]
-            | _fldExtVar <- _fldExtVars
+          [ [AppT (ConT ''Default) (VarT (mkName _fldExtVar)) | not _fldExtIsMaybe]
+              <> [ AppT (ConT ''ToJSON) (VarT (mkName _fldExtVar)),
+                   AppT (ConT ''ToSchema) (VarT (mkName _fldExtVar))
+                 ]
+            | (_fldExtIsMaybe, _fldExtVar) <- _fldExtMVars
           ]
+  let _fldExtVars = snd <$> _fldExtMVars
   let tuples =
         ( \(_fldName, _mFldTitle, _fldTyp, _fldExtIsM, _mFldExtVar) -> do
             let (_fldT, _mFldS) = case _mFldExtVar of

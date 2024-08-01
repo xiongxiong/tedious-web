@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           tedious-web
-version:        0.2.3.0
+version:        0.2.3.1
 synopsis:       Easily define multiple interrelated data types
 description:    A user-friendly web development tool that can easily define multiple interrelated data types
 category:       Web
@@ -72,6 +72,7 @@ library
     , data-default
     , data-default-instances-containers
     , effectful-core
+    , exceptions
     , extra
     , generic-lens
     , haskell-src-meta
@@ -137,6 +138,7 @@ executable tedious-web-exe
     , data-default
     , data-default-instances-containers
     , effectful-core
+    , exceptions
     , extra
     , generic-lens
     , haskell-src-meta
@@ -204,6 +206,7 @@ test-suite tedious-web-test
     , data-default
     , data-default-instances-containers
     , effectful-core
+    , exceptions
     , extra
     , generic-lens
     , haskell-src-meta

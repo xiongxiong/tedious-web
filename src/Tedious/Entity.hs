@@ -1,33 +1,26 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Tedious.Entity where
 
 import Control.Exception (Exception)
-import Control.Lens (makeLenses, (&), (.~), (<&>), (?~), (^.))
-import Data.Aeson (ToJSON (..), FromJSON (..))
-import Data.Aeson qualified as A
-import Data.Aeson.TH (deriveJSON)
-import Data.Default (Default (..))
-import Data.HashMap.Strict.InsOrd (fromList)
+import Control.Lens ((^.))
+import Control.Monad.Catch (MonadCatch (..))
+import Data.Foldable (find)
 import Data.Int (Int64)
-import Data.OpenApi (HasExample (..), HasProperties (..), HasRequired (..), HasTitle (..), HasType (..), OpenApiType (..), ToSchema, declareSchemaRef, genericDeclareNamedSchema)
-import Data.OpenApi qualified as O
-import Data.OpenApi.Internal.Schema (named)
 import Data.Profunctor.Product
-import Data.Proxy (Proxy (..))
-import Data.Text (Text)
+import Data.Text (Text, pack)
+import Data.Text.Encoding (decodeUtf8)
 import Data.Time (UTCTime)
-import Effectful (Eff)
-import Effectful.Error.Dynamic (Error, runErrorWith)
-import GHC.Generics (Generic)
+import Database.PostgreSQL.Simple (SqlError (..))
+import Effectful (Eff, (:>))
+import Effectful.Error.Dynamic (Error, runErrorWith, throwError)
 import Numeric.Natural (Natural)
 import Opaleye (Field, FieldNullable, SqlInt8, SqlText, SqlTimestamptz)
 import Tedious.Quasi (tedious)
-import Tedious.Util (schemaOptions, toJSONOptions, trimPrefixName_)
 
 [tedious|
 Page
@@ -92,6 +85,18 @@ repErrNotSupport = repErr 500 "not supported yet"
 
 catchRep :: Eff (Error Err : es) (Rep a) -> Eff es (Rep a)
 catchRep = runErrorWith (const $ return . repErr')
+
+catchSqlError :: (Error Err :> es) => [(Text, Text)] -> Eff es (Rep a) -> Eff es (Rep a)
+catchSqlError arms act = do
+  catch act procErr
+  where
+    procErr (SqlError code _ msg detail _) = do
+      let defErrMsg = "SqlError -- code : " <> show code <> ", msg : " <> show msg <> ", detail : " <> show detail
+      let errMsg = maybe (pack defErrMsg) snd $ find ((== decodeUtf8 code) . fst) arms
+      throwError $ Err 1 errMsg
+
+catchSqlErrorRep :: [(Text, Text)] -> Eff (Error Err : es) (Rep a) -> Eff es (Rep a)
+catchSqlErrorRep arms act = catchRep $ catchSqlError arms act
 
 --
 

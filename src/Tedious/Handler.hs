@@ -30,7 +30,7 @@ import Effectful.Reader.Dynamic (Reader, asks)
 import Network.HTTP.Types qualified as HTTP
 import Opaleye (DefaultFromField, Delete (Delete, dReturning, dTable, dWhere), Field, FromFields, Insert (Insert, iOnConflict, iReturning, iRows, iTable), Order, SqlBool, SqlInt8, Table, Unpackspec, Update (Update, uReturning, uTable, uUpdateWith, uWhere), countRows, limit, offset, orderBy, rCount, rReturning, runDelete, runInsert, runSelect, runUpdate, selectTable, sqlStrictText, toNullable, where_, (.==))
 import Opaleye.Internal.Table (tableIdentifier)
-import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable)
+import Tedious.Entity (Err (Err), Page (Page), PageI (_pageIFilter, _pageIPage), PageO (PageO), Rep, SysOper' (..), catchRep, fillPage, pageIndex, pageSize, rep, repErr, repOk, sysOperTable, catchSqlErrorRep)
 import WebGear.Core (BasicAuthError (..), Body, Description, Gets, Handler (arrM, setDescription, setSummary), HasTrait (from), HaveTraits, JSON (JSON), Middleware, PathVar, PlainText (..), Request, RequestHandler, RequiredResponseHeader, Response, Sets, StdHandler, Summary, With, pick, requestBody, respondA, (<<<))
 
 withDoc :: (Handler h m) => Summary -> Description -> Middleware h ts ts
@@ -208,8 +208,9 @@ add ::
   (a -> eff (Either Err a)) ->
   Table wfs rfs ->
   (a -> [wfs]) ->
+  [(Text, Text)] ->
   (RequestHandler h ts, SysOper')
-add envPool chk tbl a2t =
+add envPool chk tbl a2t sqlErrArms =
   let handler = requestBody @a JSON errorHandler $
         proc request -> do
           let toAdd = pick @(Body JSON a) $ from request
@@ -217,7 +218,7 @@ add envPool chk tbl a2t =
             arrM
               ( \toAdd -> do
                   chkRes <- chk toAdd
-                  catchRep $ do
+                  catchSqlErrorRep sqlErrArms $ do
                     toAdd_ <- either throwError pure chkRes
                     pool <- asks envPool
                     ids <- liftIO . withResource pool $ \conn -> do
@@ -254,13 +255,14 @@ dup ::
   Table wfs rfs ->
   (i -> Field fi) ->
   (r -> wfs) ->
+  [(Text, Text)] ->
   (RequestHandler h ts, SysOper')
-dup envPool tbl idf r2t =
+dup envPool tbl idf r2t sqlErrArms =
   let handler = proc request -> do
         let tid = pick @(PathVar "id" i) $ from request
         tid_ <-
           arrM
-            ( \tid -> catchRep $ do
+            ( \tid -> catchSqlErrorRep sqlErrArms $ do
                 pool <- asks envPool
                 ids <- liftIO . withResource pool $
                   \conn -> do
@@ -302,8 +304,9 @@ upd ::
   (i -> Field fi) ->
   (u -> (rfs -> wfs)) ->
   (r -> d) ->
+  [(Text, Text)] ->
   (RequestHandler h ts, SysOper')
-upd envPool chk tbl idf u2t r2d =
+upd envPool chk tbl idf u2t r2d sqlErrArms =
   let handler = requestBody @u JSON errorHandler $
         proc request -> do
           let tid = pick @(PathVar "id" i) $ from request
@@ -312,7 +315,7 @@ upd envPool chk tbl idf u2t r2d =
             arrM
               ( \(tid, toUpd) -> do
                   chkRes <- chk toUpd
-                  catchRep $ do
+                  catchSqlErrorRep sqlErrArms $ do
                     toUpd_ <- either throwError pure chkRes
                     pool <- asks envPool
                     ru <- liftIO . withResource pool $ \conn -> do
@@ -333,9 +336,8 @@ upd envPool chk tbl idf u2t r2d =
    in (handler, sysOper)
 
 del ::
-  forall i fi wfs rfs eff env es h ts. -- (record id) (field id) (table write fields) (table read fields) eff effects (app env) arrow traits
-  ( Sel1 rfs (Field fi),
-    Reader env :> es,
+  forall i wfs rfs eff env es h ts. -- (record id) (table write fields) (table read fields) eff effects (app env) arrow traits
+  ( Reader env :> es,
     IOE :> es,
     eff ~ Eff es,
     StdHandler h eff,
